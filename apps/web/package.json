@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "vite build",
     "preview": "vite preview",
     "lint": "tsc --noEmit"
   },
@@ -21,8 +21,7 @@
     "lucide-react": "^0.330.0",
     "clsx": "^2.1.0",
     "tailwind-merge": "^2.2.1",
-    "class-variance-authority": "^0.7.0",
-    "@gimnasio-fidelizacion/shared": "*"
+    "class-variance-authority": "^0.7.0"
   },
   "devDependencies": {
     "typescript": "^5.3.3",

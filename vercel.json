@@ -1,16 +1,9 @@
 {
-  "version": 2,
-  "buildCommand": "npm run build:vercel",
+  "buildCommand": "cd apps/web && npm install && npm run build",
   "outputDirectory": "apps/web/dist",
-  "installCommand": "npm install",
+  "installCommand": "echo skip",
   "framework": null,
   "rewrites": [
-    { "source": "/api/:path*", "destination": "/api/index" },
-    { "source": "/((?!api).*)", "destination": "/index.html" }
-  ],
-  "functions": {
-    "api/index.ts": {
-      "maxDuration": 30
-    }
-  }
+    { "source": "/((?!assets/).*)", "destination": "/index.html" }
+  ]
 }
