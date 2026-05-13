@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import argon2 from 'argon2';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 
 const databaseUrl =
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
       });
     }
 
-    const valid = await argon2.verify(user.passwordHash, password);
+    const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) {
       const attempts = user.failedAttempts + 1;
       const update = { failedAttempts: attempts };
