@@ -1,7 +1,4 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
-
-export default async function handler(_req: VercelRequest, res: VercelResponse) {
-  // Listar TODAS las variables de entorno disponibles (sin mostrar valores sensibles)
+export default async function handler(req, res) {
   const allEnvKeys = Object.keys(process.env).sort();
 
   const safeKeys = allEnvKeys.filter(
@@ -11,20 +8,18 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       k.includes('SUPABASE') ||
       k.includes('JWT') ||
       k.includes('NODE') ||
-      k.includes('URL') ||
       k === 'VERCEL' ||
       k === 'VERCEL_ENV' ||
       k === 'VERCEL_REGION'
   );
 
-  const envInfo: Record<string, string> = {};
+  const envInfo = {};
   for (const key of safeKeys) {
     const value = process.env[key];
     if (!value) {
       envInfo[key] = '(empty)';
     } else if (value.includes('postgres://') || value.includes('postgresql://')) {
-      // Enmascarar password en connection strings
-      envInfo[key] = value.replace(/:([^:@]+)@/, ':****@').substring(0, 120);
+      envInfo[key] = value.replace(/:([^:@]+)@/, ':****@').substring(0, 150);
     } else if (value.length > 50) {
       envInfo[key] = value.substring(0, 20) + '...(' + value.length + ' chars)';
     } else {
@@ -32,7 +27,6 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     }
   }
 
-  // Detectar cuál URL usar
   const databaseUrl =
     process.env.DATABASE_URL ||
     process.env.POSTGRES_URL ||
@@ -40,7 +34,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     process.env.POSTGRES_URL_NON_POOLING ||
     '';
 
-  let dbStatus: any = { connected: false };
+  let dbStatus = { connected: false };
   if (databaseUrl) {
     try {
       const { PrismaClient } = await import('@prisma/client');
@@ -52,7 +46,7 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
       const tenantCount = await prisma.tenant.count().catch((e) => ({ error: e.message }));
       dbStatus = { connected: true, result, userCount, tenantCount };
       await prisma.$disconnect();
-    } catch (err: any) {
+    } catch (err) {
       dbStatus = {
         connected: false,
         error: err.message,

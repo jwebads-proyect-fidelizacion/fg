@@ -1,22 +1,28 @@
-import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { PrismaClient } from '@prisma/client';
-import * as argon2 from 'argon2';
+import argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 
 const databaseUrl =
   process.env.DATABASE_URL ||
   process.env.POSTGRES_URL ||
   process.env.POSTGRES_PRISMA_URL ||
+  process.env.POSTGRES_URL_NON_POOLING ||
   '';
 
-const prisma = new PrismaClient({
-  datasources: { db: { url: databaseUrl } },
-});
-
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
+const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+let prisma;
+function getPrisma() {
+  if (!prisma) {
+    prisma = new PrismaClient({
+      datasources: { db: { url: databaseUrl } },
+    });
+  }
+  return prisma;
+}
+
+export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -32,7 +38,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!databaseUrl) {
     return res.status(500).json({
       error: 'Base de datos no configurada',
-      hint: 'Configure DATABASE_URL en las variables de entorno de Vercel',
+      hint: 'Configure DATABASE_URL o POSTGRES_URL en las variables de entorno de Vercel',
     });
   }
 
@@ -43,7 +49,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const db = getPrisma();
+    const user = await db.user.findUnique({ where: { email } });
     if (!user) {
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
@@ -58,21 +65,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const valid = await argon2.verify(user.passwordHash, password);
     if (!valid) {
       const attempts = user.failedAttempts + 1;
-      const update: any = { failedAttempts: attempts };
+      const update = { failedAttempts: attempts };
       if (attempts >= 5) {
         update.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
         update.failedAttempts = 0;
       }
-      await prisma.user.update({ where: { id: user.id }, data: update });
+      await db.user.update({ where: { id: user.id }, data: update });
       return res.status(401).json({ error: 'Credenciales inválidas' });
     }
 
-    await prisma.user.update({
+    await db.user.update({
       where: { id: user.id },
       data: { failedAttempts: 0, lockedUntil: null },
     });
 
-    const userTenants = await prisma.userTenant.findMany({
+    const userTenants = await db.userTenant.findMany({
       where: { userId: user.id },
       include: { tenant: true },
     });
@@ -106,7 +113,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         role: selectedTenant.role,
       },
     });
-  } catch (err: any) {
+  } catch (err) {
     console.error('Login error:', err);
     return res.status(500).json({
       error: 'Error interno del servidor',

@@ -1,6 +1,7 @@
 {
   "name": "gimnasio-fidelizacion",
   "private": true,
+  "type": "module",
   "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev": "turbo run dev",
