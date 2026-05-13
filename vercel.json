@@ -4,12 +4,8 @@
   "installCommand": "npm install",
   "framework": null,
   "functions": {
-    "api/index.ts": {
+    "api/**/*.ts": {
       "maxDuration": 30
     }
-  },
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/((?!assets/).*)", "destination": "/index.html" }
-  ]
+  }
 }
