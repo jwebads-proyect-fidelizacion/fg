@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+
 import { authRoutes } from '../apps/api/src/modules/auth/routes.js';
 import { memberRoutes } from '../apps/api/src/modules/members/routes.js';
 import { planRoutes } from '../apps/api/src/modules/plans/routes.js';
@@ -15,12 +16,12 @@ import { rewardRoutes } from '../apps/api/src/modules/rewards/routes.js';
 import { dashboardRoutes } from '../apps/api/src/modules/dashboard/routes.js';
 import { alertRoutes } from '../apps/api/src/modules/alerts/routes.js';
 
-let app: FastifyInstance | null = null;
+let cachedApp: FastifyInstance | null = null;
 
-async function buildApp() {
-  if (app) return app;
+async function buildApp(): Promise<FastifyInstance> {
+  if (cachedApp) return cachedApp;
 
-  app = Fastify({ logger: false });
+  const app = Fastify({ logger: false });
 
   await app.register(cors, {
     origin: true,
@@ -44,10 +45,16 @@ async function buildApp() {
   await app.register(alertRoutes, { prefix: '/api/alerts' });
 
   await app.ready();
+  cachedApp = app;
   return app;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const fastifyApp = await buildApp();
-  fastifyApp.server.emit('request', req, res);
+  try {
+    const app = await buildApp();
+    app.server.emit('request', req, res);
+  } catch (err: any) {
+    console.error('API handler error:', err);
+    res.status(500).json({ error: 'Internal server error', message: err?.message });
+  }
 }

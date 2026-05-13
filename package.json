@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
-    "build:vercel": "npm install --prefix apps/api && npm install --prefix apps/web && npx prisma generate --schema=apps/api/prisma/schema.prisma && npm run build --prefix apps/web",
+    "build:vercel": "npx prisma generate --schema=apps/api/prisma/schema.prisma && cd apps/web && npm install && npm run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "db:migrate": "prisma migrate deploy --schema=apps/api/prisma/schema.prisma",
@@ -17,10 +17,22 @@
     "turbo": "^2.1.0",
     "@vercel/node": "^3.0.0",
     "prisma": "^5.10.0",
-    "tsx": "^4.7.0"
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "@types/node": "^20.11.0"
   },
   "dependencies": {
-    "@prisma/client": "^5.10.0"
+    "@prisma/client": "^5.10.0",
+    "fastify": "^4.26.0",
+    "@fastify/cors": "^9.0.1",
+    "@fastify/multipart": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "argon2": "^0.31.2",
+    "otplib": "^12.0.1",
+    "zod": "^3.22.4",
+    "uuid": "^9.0.1",
+    "date-fns": "^3.3.1",
+    "date-fns-tz": "^2.0.0"
   },
   "packageManager": "npm@10.2.0"
 }
