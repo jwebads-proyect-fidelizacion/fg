@@ -5,14 +5,22 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
+    "build:vercel": "npm install --prefix apps/api && npm install --prefix apps/web && npx prisma generate --schema=apps/api/prisma/schema.prisma && npm run build --prefix apps/web",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "db:migrate": "turbo run db:migrate --filter=api",
-    "db:generate": "turbo run db:generate --filter=api",
-    "db:seed": "turbo run db:seed --filter=api"
+    "db:migrate": "prisma migrate deploy --schema=apps/api/prisma/schema.prisma",
+    "db:generate": "prisma generate --schema=apps/api/prisma/schema.prisma",
+    "db:seed": "tsx apps/api/prisma/seed.ts",
+    "postinstall": "prisma generate --schema=apps/api/prisma/schema.prisma || true"
   },
   "devDependencies": {
-    "turbo": "^2.1.0"
+    "turbo": "^2.1.0",
+    "@vercel/node": "^3.0.0",
+    "prisma": "^5.10.0",
+    "tsx": "^4.7.0"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.0"
   },
   "packageManager": "npm@10.2.0"
 }

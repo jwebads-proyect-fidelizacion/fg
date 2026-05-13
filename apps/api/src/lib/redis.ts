@@ -1,12 +1,10 @@
-import Redis from 'ioredis';
-
-export const redis = new Redis(process.env.REDIS_URL || 'redis://localhost:6379', {
-  maxRetriesPerRequest: null,
-  enableReadyCheck: false,
-});
-
-redis.on('error', (err) => {
-  console.error('Redis connection error:', err);
-});
+// Stub: Redis no está disponible en Vercel serverless.
+// Para producción con colas, usa Upstash Redis o migra a Railway/Render.
+export const redis = {
+  get: async (_key: string) => null,
+  set: async (_key: string, _value: string) => 'OK',
+  del: async (_key: string) => 1,
+  on: () => {},
+};
 
 export default redis;
