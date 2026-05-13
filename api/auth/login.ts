@@ -3,13 +3,20 @@ import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
 import jwt from 'jsonwebtoken';
 
-const prisma = new PrismaClient();
+const databaseUrl =
+  process.env.DATABASE_URL ||
+  process.env.POSTGRES_URL ||
+  process.env.POSTGRES_PRISMA_URL ||
+  '';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
+const prisma = new PrismaClient({
+  datasources: { db: { url: databaseUrl } },
+});
+
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -20,6 +27,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Método no permitido' });
+  }
+
+  if (!databaseUrl) {
+    return res.status(500).json({
+      error: 'Base de datos no configurada',
+      hint: 'Configure DATABASE_URL en las variables de entorno de Vercel',
+    });
   }
 
   try {
