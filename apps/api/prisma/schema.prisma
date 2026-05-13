@@ -1,0 +1,525 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── ENUMS ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  OWNER
+  ADMIN
+  RECEPTIONIST
+}
+
+enum MembershipStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  DEBIT_CARD
+  CREDIT_CARD
+  OTHER
+}
+
+enum PaymentStatus {
+  PAID
+  PENDING
+}
+
+enum AttendanceMethod {
+  MANUAL
+  QR
+}
+
+enum CampaignType {
+  REMINDER
+  BIRTHDAY
+  RENEWAL
+  PROMO
+  REFERRAL
+  NPS
+  CUSTOM
+}
+
+enum CampaignFrequency {
+  ONCE
+  DAILY
+  WEEKLY
+  MONTHLY
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  RUNNING
+  PAUSED
+  CANCELLED
+  FINISHED
+}
+
+enum MessageDirection {
+  OUTBOUND
+  INBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum RiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum PointEvent {
+  ATTENDANCE
+  PAYMENT
+  REFERRAL
+  NPS_RESPONSE
+}
+
+enum PointMoveType {
+  EARN
+  REDEEM
+  REVERSAL
+}
+
+enum NpsFrequency {
+  MONTHLY
+  QUARTERLY
+  BIANNUAL
+}
+
+// ─── MODELS ──────────────────────────────────────────────────────────────────
+
+model Tenant {
+  id                      String   @id @default(uuid())
+  name                    String
+  timezone                String   @default("America/Mexico_City")
+  whatsappPhoneId         String?
+  whatsappToken           String?
+  whatsappVerifyToken     String?
+  attendanceWindowMinutes Int      @default(30)
+  optOutKeywords          String[] @default(["BAJA", "STOP"])
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  users          UserTenant[]
+  members        Member[]
+  plans          Plan[]
+  campaigns      Campaign[]
+  segments       Segment[]
+  rewards        Reward[]
+  pointRules     PointRule[]
+  auditLogs      AuditLog[]
+  apiTokens      ApiToken[]
+  npsSurveys     NpsSurvey[]
+  alerts         Alert[]
+}
+
+model User {
+  id              String    @id @default(uuid())
+  email           String    @unique
+  passwordHash    String
+  twoFactorSecret String?
+  failedAttempts  Int       @default(0)
+  lockedUntil     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  tenants UserTenant[]
+}
+
+model UserTenant {
+  id       String @id @default(uuid())
+  userId   String
+  tenantId String
+  role     Role
+
+  user   User   @relation(fields: [userId], references: [id])
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
+}
+
+model Member {
+  id                     String    @id @default(uuid())
+  tenantId               String
+  firstName              String
+  lastName               String
+  phone                  String
+  email                  String?
+  documentId             String?
+  dateOfBirth            DateTime?
+  isActive               Boolean   @default(true)
+  optOut                 Boolean   @default(false)
+  optOutDate             DateTime?
+  optOutSource           String?
+  marketingConsent       Boolean   @default(false)
+  marketingConsentDate   DateTime?
+  marketingConsentChannel String?
+  referralCode           String
+  referredById           String?
+  isReferred             Boolean   @default(false)
+  riskScore              Int?
+  riskLevel              RiskLevel?
+  riskScoreDate          DateTime?
+  riskInsufficient       Boolean   @default(false)
+  pointsBalance          Int       @default(0)
+  qrCode                 String    @unique @default(uuid())
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deactivatedAt          DateTime?
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  referredBy   Member?      @relation("Referrals", fields: [referredById], references: [id])
+  referrals    Member[]     @relation("Referrals")
+  memberships  Membership[]
+  attendances  Attendance[]
+  pointMovements PointMovement[]
+  messages     Message[]
+  npsResponses NpsResponse[]
+  tags         MemberTag[]
+  redemptions  Redemption[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, isActive])
+  @@index([tenantId, referralCode])
+}
+
+model MemberTag {
+  id       String @id @default(uuid())
+  memberId String
+  tag      String
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@unique([memberId, tag])
+  @@index([tag])
+}
+
+model Plan {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  durationDays Int
+  price       Decimal  @db.Decimal(12, 2)
+  currency    String   @default("MXN")
+  isArchived  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  memberships Membership[]
+
+  @@index([tenantId])
+}
+
+model Membership {
+  id           String           @id @default(uuid())
+  tenantId     String
+  memberId     String
+  planId       String
+  startDate    DateTime
+  endDate      DateTime
+  status       MembershipStatus @default(ACTIVE)
+  cancelledAt  DateTime?
+  cancelReason String?
+  createdAt    DateTime         @default(now())
+
+  member   Member    @relation(fields: [memberId], references: [id])
+  plan     Plan      @relation(fields: [planId], references: [id])
+  payments Payment[]
+
+  @@index([tenantId, memberId, status])
+  @@index([tenantId, endDate])
+}
+
+model Attendance {
+  id        String           @id @default(uuid())
+  tenantId  String
+  memberId  String
+  timestamp DateTime
+  method    AttendanceMethod
+  createdAt DateTime         @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([tenantId, memberId, timestamp])
+}
+
+model Payment {
+  id           String        @id @default(uuid())
+  tenantId     String
+  membershipId String
+  amount       Decimal       @db.Decimal(12, 2)
+  currency     String
+  paymentDate  DateTime
+  method       PaymentMethod
+  status       PaymentStatus
+  isVoided     Boolean       @default(false)
+  voidedAt     DateTime?
+  voidedBy     String?
+  voidReason   String?
+  createdAt    DateTime      @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id])
+
+  @@index([tenantId, membershipId])
+  @@index([tenantId, paymentDate])
+}
+
+model Segment {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  criteria  Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  campaigns Campaign[]
+
+  @@index([tenantId])
+}
+
+model Campaign {
+  id               String            @id @default(uuid())
+  tenantId         String
+  name             String
+  objective        String
+  type             CampaignType
+  segmentId        String?
+  templateName     String
+  templateLanguage String            @default("es")
+  frequency        CampaignFrequency
+  startAt          DateTime
+  endAt            DateTime?
+  status           CampaignStatus    @default(DRAFT)
+  attributionDays  Int               @default(7)
+  config           Json?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  tenant     Tenant              @relation(fields: [tenantId], references: [id])
+  segment    Segment?            @relation(fields: [segmentId], references: [id])
+  executions CampaignExecution[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId, status])
+}
+
+model CampaignExecution {
+  id          String    @id @default(uuid())
+  campaignId  String
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  totalTarget Int       @default(0)
+  sent        Int       @default(0)
+  delivered   Int       @default(0)
+  read        Int       @default(0)
+  failed      Int       @default(0)
+  responded   Int       @default(0)
+  conversions Int       @default(0)
+
+  campaign Campaign  @relation(fields: [campaignId], references: [id])
+  messages Message[]
+
+  @@index([campaignId])
+}
+
+model Message {
+  id              String           @id @default(uuid())
+  tenantId        String
+  memberId        String
+  executionId     String?
+  direction       MessageDirection
+  templateName    String?
+  body            String?
+  whatsappMsgId   String?
+  status          MessageStatus    @default(PENDING)
+  statusUpdatedAt DateTime?
+  sentAt          DateTime?
+  deliveredAt     DateTime?
+  readAt          DateTime?
+  failedAt        DateTime?
+  failReason      String?
+  retryCount      Int              @default(0)
+  createdAt       DateTime         @default(now())
+
+  member    Member             @relation(fields: [memberId], references: [id])
+  execution CampaignExecution? @relation(fields: [executionId], references: [id])
+
+  @@index([tenantId, memberId, createdAt])
+  @@index([tenantId, status])
+}
+
+model ConversationWindow {
+  id        String   @id @default(uuid())
+  tenantId  String
+  memberId  String
+  openedAt  DateTime
+  expiresAt DateTime
+
+  @@unique([tenantId, memberId])
+  @@index([expiresAt])
+}
+
+model PointRule {
+  id        String    @id @default(uuid())
+  tenantId  String
+  event     PointEvent
+  points    Int
+  isEnabled Boolean   @default(true)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, event])
+}
+
+model Reward {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  pointsCost Int
+  stock     Int?
+  startDate DateTime
+  endDate   DateTime
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  redemptions Redemption[]
+
+  @@index([tenantId])
+}
+
+model Redemption {
+  id          String   @id @default(uuid())
+  tenantId    String
+  memberId    String
+  rewardId    String
+  pointsSpent Int
+  code        String
+  redeemedAt  DateTime @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+  reward Reward @relation(fields: [rewardId], references: [id])
+
+  @@index([tenantId, memberId])
+}
+
+model PointMovement {
+  id          String        @id @default(uuid())
+  tenantId    String
+  memberId    String
+  type        PointMoveType
+  points      Int
+  balance     Int
+  event       String?
+  referenceId String?
+  createdAt   DateTime      @default(now())
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@index([tenantId, memberId, createdAt])
+}
+
+model NpsSurvey {
+  id                String       @id @default(uuid())
+  tenantId          String
+  mainQuestion      String
+  followUpQuestions Json?
+  frequency         NpsFrequency
+  isActive          Boolean      @default(true)
+  lastSentAt        DateTime?
+  createdAt         DateTime     @default(now())
+
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  responses NpsResponse[]
+
+  @@index([tenantId])
+}
+
+model NpsResponse {
+  id          String    @id @default(uuid())
+  tenantId    String
+  surveyId    String
+  memberId    String
+  token       String    @unique
+  score       Int?
+  answers     Json?
+  respondedAt DateTime?
+  expiresAt   DateTime
+  sentAt      DateTime
+  isUsed      Boolean   @default(false)
+
+  survey NpsSurvey @relation(fields: [surveyId], references: [id])
+  member Member    @relation(fields: [memberId], references: [id])
+
+  @@index([tenantId, surveyId])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  tenantId   String
+  userId     String
+  action     String
+  entityType String?
+  entityId   String?
+  details    Json?
+  ipAddress  String
+  timestamp  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, timestamp])
+  @@index([tenantId, userId, timestamp])
+  @@index([tenantId, action])
+}
+
+model ApiToken {
+  id         String    @id @default(uuid())
+  tenantId   String
+  tokenHash  String    @unique
+  name       String
+  isRevoked  Boolean   @default(false)
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  lastUsedAt DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId])
+}
+
+model Alert {
+  id        String   @id @default(uuid())
+  tenantId  String
+  type      String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, isRead, createdAt])
+}
