@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd $VERCEL_PROJECT_ROOT && npx prisma generate --schema=apps/api/prisma/schema.prisma && cd apps/web && npm install && npx vite build",
+  "buildCommand": "npm run build:vercel",
   "outputDirectory": "apps/web/dist",
   "installCommand": "npm install",
   "framework": null,
