@@ -4,34 +4,12 @@
   "installCommand": "npm install",
   "framework": null,
   "functions": {
-    "api/**/*.js": {
+    "api/index.js": {
       "maxDuration": 60
     }
   },
   "rewrites": [
-    { "source": "/api/auth/login", "destination": "/api/auth/login" },
-    { "source": "/api/ai/campaign-assistant", "destination": "/api/ai/campaign-assistant" },
-    { "source": "/api/ai/churn-analysis", "destination": "/api/ai/churn-analysis" },
-    { "source": "/api/ai/reward-recommendations", "destination": "/api/ai/reward-recommendations" },
-    { "source": "/api/ai/insights", "destination": "/api/ai/insights" },
-    { "source": "/api/dashboard", "destination": "/api/dashboard" },
-    { "source": "/api/members", "destination": "/api/members" },
-    { "source": "/api/members/:path*", "destination": "/api/members" },
-    { "source": "/api/plans", "destination": "/api/plans" },
-    { "source": "/api/plans/:path*", "destination": "/api/plans" },
-    { "source": "/api/campaigns", "destination": "/api/campaigns" },
-    { "source": "/api/campaigns/:path*", "destination": "/api/campaigns" },
-    { "source": "/api/segments", "destination": "/api/segments" },
-    { "source": "/api/segments/:path*", "destination": "/api/segments" },
-    { "source": "/api/attendances", "destination": "/api/attendances" },
-    { "source": "/api/attendances/:path*", "destination": "/api/attendances" },
-    { "source": "/api/payments", "destination": "/api/payments" },
-    { "source": "/api/payments/:path*", "destination": "/api/payments" },
-    { "source": "/api/rewards", "destination": "/api/rewards" },
-    { "source": "/api/rewards/:path*", "destination": "/api/rewards" },
-    { "source": "/api/alerts", "destination": "/api/alerts" },
-    { "source": "/api/alerts/:path*", "destination": "/api/alerts" },
-    { "source": "/api/health", "destination": "/api/health" },
+    { "source": "/api/(.*)", "destination": "/api/index" },
     { "source": "/((?!api/|assets/).*)", "destination": "/index.html" }
   ]
 }
