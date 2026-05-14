@@ -34,7 +34,7 @@ const navigation = [
   { name: 'Recompensas', href: '/rewards', icon: Gift },
   { name: 'Alertas', href: '/alerts', icon: Bell },
   { name: 'IA Insights', href: '/ai', icon: Sparkles },
-];
+]; // v2
 
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
