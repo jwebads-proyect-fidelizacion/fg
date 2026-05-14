@@ -2,20 +2,12 @@
   "name": "gimnasio-fidelizacion",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "build:vercel": "npx prisma generate --schema=apps/api/prisma/schema.prisma && cd apps/web && npm install && npm run build",
-    "lint": "turbo run lint",
-    "test": "turbo run test",
-    "db:migrate": "prisma migrate deploy --schema=apps/api/prisma/schema.prisma",
-    "db:generate": "prisma generate --schema=apps/api/prisma/schema.prisma",
-    "db:seed": "tsx apps/api/prisma/seed.ts",
-    "postinstall": "prisma generate --schema=apps/api/prisma/schema.prisma || true"
+    "dev": "cd apps/web && npm run dev",
+    "build:vercel": "cd apps/api && npx prisma generate && cd ../.. && cd apps/web && npm install && npx vite build",
+    "postinstall": "cd apps/api && npx prisma generate || true"
   },
   "devDependencies": {
-    "turbo": "^2.1.0",
     "@vercel/node": "^3.0.0",
     "prisma": "^5.10.0",
     "tsx": "^4.7.0",
