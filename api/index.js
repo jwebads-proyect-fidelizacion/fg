@@ -213,16 +213,63 @@ async function handleHealth(req, res) {
 }
 
 // --- AUTH LOGIN ---
+// Demo credentials (work without database)
+const DEMO_USERS = [
+  {
+    id: 'demo-user-001',
+    email: 'demo@gymfideliza.com',
+    password: 'Demo2026!',
+    tenantId: 'demo-tenant-001',
+    tenantName: 'GymFit Demo',
+    role: 'OWNER',
+  },
+  {
+    id: 'demo-user-002',
+    email: 'admin@gymfit.com',
+    password: 'Admin123!@#',
+    tenantId: 'demo-tenant-001',
+    tenantName: 'GymFit Demo',
+    role: 'ADMIN',
+  },
+];
+
 async function handleAuthLogin(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
-  if (!DATABASE_URL) {
-    return res.status(500).json({
-      error: 'Base de datos no configurada',
-      hint: 'Configure DATABASE_URL o POSTGRES_URL en las variables de entorno de Vercel',
+
+  const { email, password } = req.body || {};
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
+  }
+
+  // Check demo users first (works without database)
+  const demoUser = DEMO_USERS.find(
+    (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
+  );
+  if (demoUser) {
+    const payload = {
+      userId: demoUser.id,
+      tenantId: demoUser.tenantId,
+      role: demoUser.role,
+    };
+    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
+    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: '30d' });
+    return res.status(200).json({
+      accessToken,
+      refreshToken,
+      user: { id: demoUser.id, email: demoUser.email },
+      tenants: [{ id: demoUser.tenantId, name: demoUser.tenantName, role: demoUser.role }],
+      currentTenant: { id: demoUser.tenantId, name: demoUser.tenantName, role: demoUser.role },
+      isDemo: true,
     });
   }
 
-  const { email, password } = req.body || {};
+  // If no database, reject non-demo users
+  if (!DATABASE_URL) {
+    return res.status(401).json({
+      error: 'Credenciales inválidas',
+      hint: 'Usa demo@gymfideliza.com / Demo2026! para acceso de prueba',
+    });
+  }
   if (!email || !password) {
     return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
   }
@@ -290,10 +337,23 @@ async function handleAuthLogin(req, res) {
 }
 
 // --- DASHBOARD ---
+const DEMO_DASHBOARD = {
+  members: { total: 5, active: 3, new: 2, newPreviousPeriod: 1, atRisk: 1 },
+  retention: { rate: 80, churnRate: 20, churnCount: 1 },
+  attendance: { today: 4, last30Days: 87, avgPerMember: 5.8 },
+  revenue: { currentMonth: 8500, lastMonth: 7200, projected: 12000, currency: 'MXN' },
+  generatedAt: new Date().toISOString(),
+};
+
 async function handleDashboard(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  // Return demo data if no database
+  if (!DATABASE_URL) {
+    return res.status(200).json({ ...DEMO_DASHBOARD, generatedAt: new Date().toISOString() });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -381,6 +441,14 @@ async function handleDashboard(req, res) {
 }
 
 // --- MEMBERS ---
+const DEMO_MEMBERS = [
+  { id: 'member-001', firstName: 'María', lastName: 'González', phone: '+5215512345678', email: 'maria@email.com', isActive: true, pointsBalance: 150, riskLevel: 'LOW', createdAt: new Date('2024-01-15'), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Premium', price: 899, currency: 'MXN' } }] },
+  { id: 'member-002', firstName: 'Carlos', lastName: 'Hernández', phone: '+5215587654321', email: 'carlos@email.com', isActive: true, pointsBalance: 320, riskLevel: 'MEDIUM', createdAt: new Date('2024-02-10'), memberships: [{ status: 'ACTIVE', plan: { name: 'Trimestral', price: 2299, currency: 'MXN' } }] },
+  { id: 'member-003', firstName: 'Ana', lastName: 'López', phone: '+5215511223344', email: 'ana@email.com', isActive: true, pointsBalance: 80, riskLevel: 'LOW', createdAt: new Date('2024-03-05'), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Básico', price: 599, currency: 'MXN' } }] },
+  { id: 'member-004', firstName: 'Roberto', lastName: 'Martínez', phone: '+5215599887766', email: 'roberto@email.com', isActive: true, pointsBalance: 0, riskLevel: null, createdAt: new Date('2024-04-20'), memberships: [] },
+  { id: 'member-005', firstName: 'Laura', lastName: 'Ramírez', phone: '+5215544556677', email: 'laura@email.com', isActive: true, pointsBalance: 500, riskLevel: 'HIGH', createdAt: new Date('2024-01-01'), memberships: [{ status: 'ACTIVE', plan: { name: 'Anual VIP', price: 7999, currency: 'MXN' } }] },
+];
+
 function generateReferralCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -391,6 +459,20 @@ function generateReferralCode() {
 async function handleMembers(req, res) {
   const user = requireAuth(req, res);
   if (!user) return;
+
+  // Return demo data if no database
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') {
+      return res.status(200).json({ data: DEMO_MEMBERS, pagination: { total: DEMO_MEMBERS.length, page: 1, limit: 20, totalPages: 1 } });
+    }
+    if (req.method === 'POST') {
+      const { firstName, lastName, phone } = req.body || {};
+      if (!firstName || !lastName || !phone) return res.status(400).json({ error: 'Nombre, apellido y teléfono son requeridos' });
+      const newMember = { id: `member-${Date.now()}`, firstName, lastName, phone, isActive: true, pointsBalance: 0, createdAt: new Date(), memberships: [] };
+      return res.status(201).json(newMember);
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -476,9 +558,26 @@ async function handleMembers(req, res) {
 }
 
 // --- PLANS ---
+const DEMO_PLANS = [
+  { id: 'plan-001', name: 'Mensual Básico', description: 'Acceso de lunes a viernes', durationDays: 30, price: 599, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
+  { id: 'plan-002', name: 'Mensual Premium', description: 'Acceso completo + clases grupales', durationDays: 30, price: 899, currency: 'MXN', isArchived: false, _count: { memberships: 2 } },
+  { id: 'plan-003', name: 'Trimestral', description: 'Acceso completo por 3 meses', durationDays: 90, price: 2299, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
+  { id: 'plan-004', name: 'Anual VIP', description: 'Acceso ilimitado + clases + nutriólogo', durationDays: 365, price: 7999, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
+];
+
 async function handlePlans(req, res) {
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_PLANS });
+    if (req.method === 'POST') {
+      const { name, durationDays, price, currency = 'MXN' } = req.body || {};
+      if (!name || !durationDays || price === undefined) return res.status(400).json({ error: 'Faltan campos requeridos' });
+      return res.status(201).json({ id: `plan-${Date.now()}`, name, durationDays: parseInt(durationDays), price: parseFloat(price), currency, isArchived: false });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -517,6 +616,16 @@ async function handlePlans(req, res) {
 async function handleAttendances(req, res) {
   const user = requireAuth(req, res);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: [] });
+    if (req.method === 'POST') {
+      const { memberId } = req.body || {};
+      const member = DEMO_MEMBERS.find(m => m.id === memberId) || DEMO_MEMBERS[0];
+      return res.status(201).json({ id: `att-${Date.now()}`, memberId: member.id, timestamp: new Date(), method: 'MANUAL', member: { firstName: member.firstName, lastName: member.lastName } });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -577,9 +686,24 @@ async function handleAttendances(req, res) {
 }
 
 // --- CAMPAIGNS ---
+const DEMO_CAMPAIGNS = [
+  { id: 'camp-001', name: 'Reactivación Socios Inactivos', objective: 'Recuperar socios que no han venido en 2 semanas', type: 'REMINDER', status: 'DRAFT', templateName: 'reactivacion_v1', frequency: 'ONCE', startAt: new Date(), createdAt: new Date(), segment: { id: 'seg-001', name: 'Inactivos 14+ días' }, _count: { executions: 0 } },
+  { id: 'camp-002', name: 'Felicitación de Cumpleaños', objective: 'Enviar saludo y beneficio en cumpleaños', type: 'BIRTHDAY', status: 'RUNNING', templateName: 'cumpleanos_v1', frequency: 'DAILY', startAt: new Date(), createdAt: new Date(), segment: null, _count: { executions: 3 } },
+];
+
 async function handleCampaigns(req, res) {
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_CAMPAIGNS, pagination: { total: DEMO_CAMPAIGNS.length } });
+    if (req.method === 'POST') {
+      const { name, objective, type, templateName, frequency, startAt } = req.body || {};
+      if (!name || !type) return res.status(400).json({ error: 'Faltan campos requeridos' });
+      return res.status(201).json({ id: `camp-${Date.now()}`, name, objective, type, templateName, frequency, startAt, status: 'DRAFT', createdAt: new Date() });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -631,9 +755,24 @@ async function handleCampaigns(req, res) {
 }
 
 // --- SEGMENTS ---
+const DEMO_SEGMENTS = [
+  { id: 'seg-001', name: 'Inactivos 14+ días', criteria: { lastAttendanceDaysAgo: 14, membershipStatus: 'ACTIVE' }, createdAt: new Date(), _count: { campaigns: 1 } },
+  { id: 'seg-002', name: 'Socios en riesgo alto', criteria: { riskLevel: 'HIGH' }, createdAt: new Date(), _count: { campaigns: 0 } },
+];
+
 async function handleSegments(req, res) {
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_SEGMENTS });
+    if (req.method === 'POST') {
+      const { name, criteria } = req.body || {};
+      if (!name) return res.status(400).json({ error: 'Nombre requerido' });
+      return res.status(201).json({ id: `seg-${Date.now()}`, name, criteria: criteria || {}, createdAt: new Date() });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -660,9 +799,24 @@ async function handleSegments(req, res) {
 }
 
 // --- PAYMENTS ---
+const DEMO_PAYMENTS = [
+  { id: 'pay-001', amount: 899, currency: 'MXN', paymentDate: new Date(), method: 'CASH', status: 'PAID', isVoided: false, membership: { member: { firstName: 'María', lastName: 'González' }, plan: { name: 'Mensual Premium' } } },
+  { id: 'pay-002', amount: 2299, currency: 'MXN', paymentDate: new Date(Date.now() - 86400000 * 5), method: 'BANK_TRANSFER', status: 'PAID', isVoided: false, membership: { member: { firstName: 'Carlos', lastName: 'Hernández' }, plan: { name: 'Trimestral' } } },
+];
+
 async function handlePayments(req, res) {
   const user = requireAuth(req, res);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_PAYMENTS });
+    if (req.method === 'POST') {
+      const { amount, method, status = 'PAID' } = req.body || {};
+      if (!amount || !method) return res.status(400).json({ error: 'Faltan campos requeridos' });
+      return res.status(201).json({ id: `pay-${Date.now()}`, amount: parseFloat(amount), currency: 'MXN', paymentDate: new Date(), method, status });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -708,9 +862,25 @@ async function handlePayments(req, res) {
 }
 
 // --- REWARDS ---
+const DEMO_REWARDS = [
+  { id: 'rew-001', name: 'Clase de yoga gratis', pointsCost: 100, stock: 20, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 180), isActive: true, _count: { redemptions: 3 } },
+  { id: 'rew-002', name: '10% descuento en renovación', pointsCost: 250, stock: null, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 365), isActive: true, _count: { redemptions: 7 } },
+  { id: 'rew-003', name: 'Playera GymFit', pointsCost: 500, stock: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 180), isActive: true, _count: { redemptions: 2 } },
+];
+
 async function handleRewards(req, res) {
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_REWARDS });
+    if (req.method === 'POST') {
+      const { name, pointsCost, startDate, endDate } = req.body || {};
+      if (!name || !pointsCost || !startDate || !endDate) return res.status(400).json({ error: 'Faltan campos requeridos' });
+      return res.status(201).json({ id: `rew-${Date.now()}`, name, pointsCost: parseInt(pointsCost), stock: null, startDate: new Date(startDate), endDate: new Date(endDate), isActive: true });
+    }
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
@@ -747,9 +917,19 @@ async function handleRewards(req, res) {
 }
 
 // --- ALERTS ---
+const DEMO_ALERTS = [
+  { id: 'alert-001', type: 'RISK', title: 'Socio en riesgo alto', message: 'Laura Ramírez no ha asistido en 12 días y su membresía vence pronto', isRead: false, createdAt: new Date(Date.now() - 3600000) },
+  { id: 'alert-002', type: 'INFO', title: 'Campaña completada', message: 'La campaña "Reactivación Mayo" fue enviada a 23 socios con 34% de apertura', isRead: true, createdAt: new Date(Date.now() - 86400000) },
+];
+
 async function handleAlerts(req, res) {
   const user = requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
+
+  if (!DATABASE_URL) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_ALERTS, unreadCount: DEMO_ALERTS.filter(a => !a.isRead).length });
+    return res.status(405).json({ error: 'Método no permitido' });
+  }
 
   const db = getPrisma();
   const tenantId = user.tenantId;
