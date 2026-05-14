@@ -13,6 +13,7 @@ import Rewards from './pages/Rewards';
 import Payments from './pages/Payments';
 import Segments from './pages/Segments';
 import Alerts from './pages/Alerts';
+import AIInsights from './pages/AIInsights';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -48,6 +49,7 @@ function App() {
             <Route path="/payments" element={<Payments />} />
             <Route path="/segments" element={<Segments />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/ai" element={<AIInsights />} />
             <Route path="/memberships" element={<Navigate to="/members" replace />} />
             <Route path="/points" element={<Navigate to="/rewards" replace />} />
           </Route>

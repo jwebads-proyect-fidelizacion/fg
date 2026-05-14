@@ -5,13 +5,16 @@
   "framework": null,
   "functions": {
     "api/**/*.js": {
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [
     { "source": "/api/auth/login", "destination": "/api/auth/login" },
+    { "source": "/api/ai/campaign-assistant", "destination": "/api/ai/campaign-assistant" },
+    { "source": "/api/ai/churn-analysis", "destination": "/api/ai/churn-analysis" },
+    { "source": "/api/ai/reward-recommendations", "destination": "/api/ai/reward-recommendations" },
+    { "source": "/api/ai/insights", "destination": "/api/ai/insights" },
     { "source": "/api/dashboard", "destination": "/api/dashboard" },
-    { "source": "/api/dashboard/:path*", "destination": "/api/dashboard" },
     { "source": "/api/members", "destination": "/api/members" },
     { "source": "/api/members/:path*", "destination": "/api/members" },
     { "source": "/api/plans", "destination": "/api/plans" },

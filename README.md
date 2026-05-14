@@ -129,3 +129,57 @@ npm run test            # Ejecutar tests
 ## 📄 Licencia
 
 Privado - Todos los derechos reservados.
+
+
+## 🤖 Funcionalidades de IA
+
+La app incluye un módulo de inteligencia artificial con 4 capacidades:
+
+### 1. Insights del Negocio
+Análisis ejecutivo automático con IA que genera:
+- Health Score del negocio (0-100)
+- Fortalezas y puntos de atención detectados
+- Oportunidades con impacto monetario estimado
+- Predicciones de ingresos, churn y crecimiento
+- Acción prioritaria del día
+
+### 2. Asistente para Crear Campañas
+Describe en lenguaje natural lo que quieres y la IA genera:
+- Segmento con criterios automáticos
+- 3 variantes de mensaje (formal, casual, urgencia)
+- Mejor hora de envío predicha
+- Estimación de alcance, conversión e ingresos
+
+### 3. Análisis de Riesgo por Socio
+Para cualquier socio, la IA analiza:
+- Score de riesgo de abandono detallado
+- Top razones del riesgo
+- Acciones recomendadas con prioridad
+- Mensaje de retención personalizado
+- Lifetime value proyectado
+
+### 4. Recompensas Personalizadas
+Genera recomendaciones específicas por socio:
+- 4-6 recompensas con match score
+- Categorización por tipo
+- Oferta exclusiva con vigencia sugerida
+- Análisis del perfil y etapa de fidelización
+
+### Configuración
+
+Para activar las funciones de IA, agrega en Vercel → Settings → Environment Variables:
+
+| Variable | Valor |
+|----------|-------|
+| `OPENAI_API_KEY` | Tu API key de OpenAI ([obtener](https://platform.openai.com/api-keys)) |
+| `AI_MODEL` | (opcional) `gpt-4o-mini` (default, más barato) o `gpt-4o` (más potente) |
+
+**Costo estimado:** $0.01-0.05 USD por análisis con `gpt-4o-mini`.
+
+Alternativamente, puedes usar Anthropic Claude:
+
+| Variable | Valor |
+|----------|-------|
+| `AI_PROVIDER` | `anthropic` |
+| `ANTHROPIC_API_KEY` | Tu API key de Anthropic |
+| `AI_MODEL` | `claude-3-5-sonnet-20241022` |

@@ -17,6 +17,7 @@ import {
   X,
   ChevronDown,
   Dumbbell,
+  Sparkles,
 } from 'lucide-react';
 import { useAuthStore } from '../stores/authStore';
 
@@ -32,6 +33,7 @@ const navigation = [
   { name: 'Puntos', href: '/points', icon: Star },
   { name: 'Recompensas', href: '/rewards', icon: Gift },
   { name: 'Alertas', href: '/alerts', icon: Bell },
+  { name: 'IA Insights', href: '/ai', icon: Sparkles },
 ];
 
 export default function Layout() {
