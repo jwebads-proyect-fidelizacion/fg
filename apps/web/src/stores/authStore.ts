@@ -42,9 +42,9 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email: string, password: string) => {
         const response = await api.post('/auth/login', { email, password });
-        const { accessToken, refreshToken, user, tenants, currentTenant } = response.data;
+        const { access_token, refresh_token, user, tenants, currentTenant } = response.data;
 
-        const tokens = { accessToken, refreshToken };
+        const tokens = { accessToken: access_token, refreshToken: refresh_token };
         localStorage.setItem('auth-tokens', JSON.stringify(tokens));
 
         set({

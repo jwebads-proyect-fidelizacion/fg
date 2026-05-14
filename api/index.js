@@ -1,45 +1,42 @@
 // =============================================================================
 // api/index.js — Single Vercel serverless function handling all API routes
+// Uses @supabase/supabase-js instead of Prisma + JWT
 // =============================================================================
 
-import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
+import { createClient } from '@supabase/supabase-js';
 
 // ---------------------------------------------------------------------------
-// Shared config
+// Config
 // ---------------------------------------------------------------------------
-const DATABASE_URL =
-  process.env.DATABASE_URL ||
-  process.env.POSTGRES_URL ||
-  process.env.POSTGRES_PRISMA_URL ||
-  process.env.POSTGRES_URL_NON_POOLING ||
-  '';
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
-const JWT_REFRESH_SECRET =
-  process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret-change-in-production';
+const SUPABASE_URL = process.env.SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 // AI config
 const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
 const AI_API_KEY = process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 const AI_MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
 
+// Demo mode: when SUPABASE_URL is not configured
+const IS_DEMO_MODE = !SUPABASE_URL;
+
 // ---------------------------------------------------------------------------
-// Prisma singleton
+// Supabase singleton (service-level client using anon key)
 // ---------------------------------------------------------------------------
-let prisma;
-function getPrisma() {
-  if (!prisma) {
-    prisma = new PrismaClient({
-      datasources: { db: { url: DATABASE_URL } },
+let _supabase = null;
+function getSupabase() {
+  if (!_supabase) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      throw new Error('SUPABASE_URL and SUPABASE_ANON_KEY must be set');
+    }
+    _supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
     });
   }
-  return prisma;
+  return _supabase;
 }
 
 // ---------------------------------------------------------------------------
-// Auth helpers
+// CORS
 // ---------------------------------------------------------------------------
 function setCors(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -47,19 +44,50 @@ function setCors(res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 }
 
-function verifyAuth(req) {
-  const authHeader = req.headers.authorization || '';
-  if (!authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.substring(7);
+// ---------------------------------------------------------------------------
+// Auth middleware
+// ---------------------------------------------------------------------------
+async function getUser(req) {
+  const token = req.headers.authorization?.replace('Bearer ', '');
+  if (!token) return null;
+
+  // Demo token
+  if (token === 'demo-token-gymfideliza') {
+    return {
+      id: 'demo-user-001',
+      email: 'demo@gymfideliza.com',
+      tenantId: 'demo-tenant-001',
+      role: 'OWNER',
+      tenantName: 'GymFit Demo',
+      isDemo: true,
+    };
+  }
+
   try {
-    return jwt.verify(token, JWT_SECRET);
+    const supabase = getSupabase();
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return null;
+
+    // Get tenant info from UserTenant table
+    const { data: ut } = await supabase
+      .from('UserTenant')
+      .select('tenantId, role, Tenant(name)')
+      .eq('userId', user.id)
+      .single();
+
+    return {
+      ...user,
+      tenantId: ut?.tenantId ?? null,
+      role: ut?.role ?? null,
+      tenantName: ut?.Tenant?.name ?? null,
+    };
   } catch {
     return null;
   }
 }
 
-function requireAuth(req, res) {
-  const user = verifyAuth(req);
+async function requireAuth(req, res) {
+  const user = await getUser(req);
   if (!user) {
     res.status(401).json({ error: 'No autenticado' });
     return null;
@@ -67,8 +95,8 @@ function requireAuth(req, res) {
   return user;
 }
 
-function requireRole(req, res, allowedRoles) {
-  const user = requireAuth(req, res);
+async function requireRole(req, res, allowedRoles) {
+  const user = await requireAuth(req, res);
   if (!user) return null;
   if (!allowedRoles.includes(user.role)) {
     res.status(403).json({ error: 'Permiso insuficiente' });
@@ -156,30 +184,67 @@ async function callAnthropic(systemPrompt, userPrompt, opts) {
 }
 
 // ---------------------------------------------------------------------------
-// Route handlers
+// Demo data
 // ---------------------------------------------------------------------------
+const DEMO_MEMBERS = [
+  { id: 'member-001', firstName: 'María', lastName: 'González', phone: '+5215512345678', email: 'maria@email.com', isActive: true, pointsBalance: 150, riskLevel: 'LOW', createdAt: new Date('2024-01-15').toISOString(), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Premium', price: 899, currency: 'MXN' } }] },
+  { id: 'member-002', firstName: 'Carlos', lastName: 'Hernández', phone: '+5215587654321', email: 'carlos@email.com', isActive: true, pointsBalance: 320, riskLevel: 'MEDIUM', createdAt: new Date('2024-02-10').toISOString(), memberships: [{ status: 'ACTIVE', plan: { name: 'Trimestral', price: 2299, currency: 'MXN' } }] },
+  { id: 'member-003', firstName: 'Ana', lastName: 'López', phone: '+5215511223344', email: 'ana@email.com', isActive: true, pointsBalance: 80, riskLevel: 'LOW', createdAt: new Date('2024-03-05').toISOString(), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Básico', price: 599, currency: 'MXN' } }] },
+  { id: 'member-004', firstName: 'Roberto', lastName: 'Martínez', phone: '+5215599887766', email: 'roberto@email.com', isActive: true, pointsBalance: 0, riskLevel: null, createdAt: new Date('2024-04-20').toISOString(), memberships: [] },
+  { id: 'member-005', firstName: 'Laura', lastName: 'Ramírez', phone: '+5215544556677', email: 'laura@email.com', isActive: true, pointsBalance: 500, riskLevel: 'HIGH', createdAt: new Date('2024-01-01').toISOString(), memberships: [{ status: 'ACTIVE', plan: { name: 'Anual VIP', price: 7999, currency: 'MXN' } }] },
+];
 
-// --- HEALTH ---
+const DEMO_PLANS = [
+  { id: 'plan-001', name: 'Mensual Básico', description: 'Acceso de lunes a viernes', durationDays: 30, price: 599, currency: 'MXN', isArchived: false, membershipCount: 1 },
+  { id: 'plan-002', name: 'Mensual Premium', description: 'Acceso completo + clases grupales', durationDays: 30, price: 899, currency: 'MXN', isArchived: false, membershipCount: 2 },
+  { id: 'plan-003', name: 'Trimestral', description: 'Acceso completo por 3 meses', durationDays: 90, price: 2299, currency: 'MXN', isArchived: false, membershipCount: 1 },
+  { id: 'plan-004', name: 'Anual VIP', description: 'Acceso ilimitado + clases + nutriólogo', durationDays: 365, price: 7999, currency: 'MXN', isArchived: false, membershipCount: 1 },
+];
+
+const DEMO_CAMPAIGNS = [
+  { id: 'camp-001', name: 'Reactivación Socios Inactivos', objective: 'Recuperar socios que no han venido en 2 semanas', type: 'REMINDER', status: 'DRAFT', templateName: 'reactivacion_v1', frequency: 'ONCE', startAt: new Date().toISOString(), createdAt: new Date().toISOString(), segment: { id: 'seg-001', name: 'Inactivos 14+ días' }, executionCount: 0 },
+  { id: 'camp-002', name: 'Felicitación de Cumpleaños', objective: 'Enviar saludo y beneficio en cumpleaños', type: 'BIRTHDAY', status: 'RUNNING', templateName: 'cumpleanos_v1', frequency: 'DAILY', startAt: new Date().toISOString(), createdAt: new Date().toISOString(), segment: null, executionCount: 3 },
+];
+
+const DEMO_SEGMENTS = [
+  { id: 'seg-001', name: 'Inactivos 14+ días', criteria: { lastAttendanceDaysAgo: 14, membershipStatus: 'ACTIVE' }, createdAt: new Date().toISOString(), campaignCount: 1 },
+  { id: 'seg-002', name: 'Socios en riesgo alto', criteria: { riskLevel: 'HIGH' }, createdAt: new Date().toISOString(), campaignCount: 0 },
+];
+
+const DEMO_PAYMENTS = [
+  { id: 'pay-001', memberId: 'member-001', amount: 899, currency: 'MXN', status: 'PAID', paymentDate: new Date('2024-04-01').toISOString(), member: { firstName: 'María', lastName: 'González' } },
+  { id: 'pay-002', memberId: 'member-002', amount: 2299, currency: 'MXN', status: 'PAID', paymentDate: new Date('2024-03-15').toISOString(), member: { firstName: 'Carlos', lastName: 'Hernández' } },
+];
+
+const DEMO_REWARDS = [
+  { id: 'rew-001', name: 'Botella de agua personalizada', description: 'Botella de 1L con logo del gym', pointsCost: 200, stock: 10, isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rew-002', name: '1 mes gratis', description: 'Un mes de membresía sin costo', pointsCost: 1000, stock: null, isActive: true, createdAt: new Date().toISOString() },
+  { id: 'rew-003', name: 'Clase de yoga gratis', description: 'Acceso a una clase especial', pointsCost: 150, stock: 5, isActive: true, createdAt: new Date().toISOString() },
+];
+
+const DEMO_ALERTS = [
+  { id: 'alert-001', type: 'MEMBERSHIP_EXPIRING', message: 'Laura Ramírez tiene su membresía por vencer en 3 días', severity: 'HIGH', isRead: false, createdAt: new Date().toISOString() },
+  { id: 'alert-002', type: 'CHURN_RISK', message: 'Carlos Hernández no ha asistido en 14 días', severity: 'MEDIUM', isRead: false, createdAt: new Date().toISOString() },
+  { id: 'alert-003', type: 'PAYMENT_OVERDUE', message: 'Roberto Martínez tiene un pago pendiente', severity: 'HIGH', isRead: true, createdAt: new Date().toISOString() },
+];
+
+const DEMO_DASHBOARD = {
+  members: { total: 5, active: 3, new: 2, newPreviousPeriod: 1, atRisk: 1 },
+  retention: { rate: 80, churnRate: 20, churnCount: 1 },
+  attendance: { today: 4, last30Days: 87, avgPerMember: 5.8 },
+  revenue: { currentMonth: 8500, lastMonth: 7200, projected: 12000, currency: 'MXN' },
+};
+
+// ---------------------------------------------------------------------------
+// Route: GET /api/health
+// ---------------------------------------------------------------------------
 async function handleHealth(req, res) {
-  const allEnvKeys = Object.keys(process.env).sort();
-  const safeKeys = allEnvKeys.filter(
-    (k) =>
-      k.includes('DATABASE') ||
-      k.includes('POSTGRES') ||
-      k.includes('SUPABASE') ||
-      k.includes('JWT') ||
-      k.includes('NODE') ||
-      k === 'VERCEL' ||
-      k === 'VERCEL_ENV' ||
-      k === 'VERCEL_REGION'
-  );
   const envInfo = {};
-  for (const key of safeKeys) {
+  const relevantKeys = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'NODE_ENV', 'VERCEL', 'VERCEL_ENV', 'VERCEL_REGION', 'AI_PROVIDER'];
+  for (const key of relevantKeys) {
     const value = process.env[key];
     if (!value) {
       envInfo[key] = '(empty)';
-    } else if (value.includes('postgres://') || value.includes('postgresql://')) {
-      envInfo[key] = value.replace(/:([^:@]+)@/, ':****@').substring(0, 150);
     } else if (value.length > 50) {
       envInfo[key] = value.substring(0, 20) + '...(' + value.length + ' chars)';
     } else {
@@ -188,51 +253,32 @@ async function handleHealth(req, res) {
   }
 
   let dbStatus = { connected: false };
-  if (DATABASE_URL) {
-    try {
-      const db = getPrisma();
-      const result = await db.$queryRaw`SELECT 1 as ok`;
-      const userCount = await db.user.count().catch((e) => ({ error: e.message }));
-      const tenantCount = await db.tenant.count().catch((e) => ({ error: e.message }));
-      dbStatus = { connected: true, result, userCount, tenantCount };
-    } catch (err) {
-      dbStatus = { connected: false, error: err.message, code: err.code, name: err.name };
-    }
+  if (IS_DEMO_MODE) {
+    dbStatus = { connected: false, mode: 'demo', message: 'SUPABASE_URL not configured — running in demo mode' };
   } else {
-    dbStatus = { connected: false, error: 'No database URL found in any env var' };
+    try {
+      const supabase = getSupabase();
+      const { data, error } = await supabase.from('Tenant').select('id').limit(1);
+      if (error) throw error;
+      dbStatus = { connected: true, tenantRowsFound: data?.length ?? 0 };
+    } catch (err) {
+      dbStatus = { connected: false, error: err.message };
+    }
   }
 
   return res.status(200).json({
     status: 'ok',
     timestamp: new Date().toISOString(),
-    totalEnvVars: allEnvKeys.length,
+    mode: IS_DEMO_MODE ? 'demo' : 'production',
     relevantEnvVars: envInfo,
     database: dbStatus,
     node: process.version,
   });
 }
 
-// --- AUTH LOGIN ---
-// Demo credentials (work without database)
-const DEMO_USERS = [
-  {
-    id: 'demo-user-001',
-    email: 'demo@gymfideliza.com',
-    password: 'Demo2026!',
-    tenantId: 'demo-tenant-001',
-    tenantName: 'GymFit Demo',
-    role: 'OWNER',
-  },
-  {
-    id: 'demo-user-002',
-    email: 'admin@gymfit.com',
-    password: 'Admin123!@#',
-    tenantId: 'demo-tenant-001',
-    tenantName: 'GymFit Demo',
-    role: 'ADMIN',
-  },
-];
-
+// ---------------------------------------------------------------------------
+// Route: POST /api/auth/login
+// ---------------------------------------------------------------------------
 async function handleAuthLogin(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
 
@@ -241,194 +287,133 @@ async function handleAuthLogin(req, res) {
     return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
   }
 
-  // Check demo users first (works without database)
-  const demoUser = DEMO_USERS.find(
-    (u) => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-  );
-  if (demoUser) {
-    const payload = {
-      userId: demoUser.id,
-      tenantId: demoUser.tenantId,
-      role: demoUser.role,
-    };
-    const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
-    const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: '30d' });
-    return res.status(200).json({
-      accessToken,
-      refreshToken,
-      user: { id: demoUser.id, email: demoUser.email },
-      tenants: [{ id: demoUser.tenantId, name: demoUser.tenantName, role: demoUser.role }],
-      currentTenant: { id: demoUser.tenantId, name: demoUser.tenantName, role: demoUser.role },
-      isDemo: true,
-    });
-  }
-
-  // If no database, reject non-demo users
-  if (!DATABASE_URL) {
+  // Demo mode: accept demo credentials without Supabase
+  if (IS_DEMO_MODE) {
+    if (
+      email.toLowerCase() === 'demo@gymfideliza.com' &&
+      password === 'Demo2026!'
+    ) {
+      return res.status(200).json({
+        access_token: 'demo-token-gymfideliza',
+        token_type: 'bearer',
+        user: { id: 'demo-user-001', email: 'demo@gymfideliza.com' },
+        tenants: [{ id: 'demo-tenant-001', name: 'GymFit Demo', role: 'OWNER' }],
+        currentTenant: { id: 'demo-tenant-001', name: 'GymFit Demo', role: 'OWNER' },
+        isDemo: true,
+      });
+    }
     return res.status(401).json({
       error: 'Credenciales inválidas',
       hint: 'Usa demo@gymfideliza.com / Demo2026! para acceso de prueba',
     });
   }
-  if (!email || !password) {
-    return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
+
+  // Production: use Supabase Auth
+  const supabase = getSupabase();
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+  if (error || !data?.session) {
+    return res.status(401).json({ error: 'Credenciales inválidas', detail: error?.message });
   }
 
-  const db = getPrisma();
-  const user = await db.user.findUnique({ where: { email } });
-  if (!user) return res.status(401).json({ error: 'Credenciales inválidas' });
+  const { session, user } = data;
 
-  if (user.lockedUntil && user.lockedUntil > new Date()) {
-    const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
-    return res.status(423).json({
-      error: `Cuenta bloqueada temporalmente. Intente en ${minutesLeft} minuto(s).`,
-    });
-  }
+  // Look up tenant memberships for this user
+  const { data: userTenants, error: utError } = await supabase
+    .from('UserTenant')
+    .select('tenantId, role, Tenant(id, name)')
+    .eq('userId', user.id);
 
-  const valid = await bcrypt.compare(password, user.passwordHash);
-  if (!valid) {
-    const attempts = user.failedAttempts + 1;
-    const update = { failedAttempts: attempts };
-    if (attempts >= 5) {
-      update.lockedUntil = new Date(Date.now() + 15 * 60 * 1000);
-      update.failedAttempts = 0;
-    }
-    await db.user.update({ where: { id: user.id }, data: update });
-    return res.status(401).json({ error: 'Credenciales inválidas' });
-  }
-
-  await db.user.update({
-    where: { id: user.id },
-    data: { failedAttempts: 0, lockedUntil: null },
-  });
-
-  const userTenants = await db.userTenant.findMany({
-    where: { userId: user.id },
-    include: { tenant: true },
-  });
-  if (userTenants.length === 0) {
+  if (utError || !userTenants || userTenants.length === 0) {
     return res.status(403).json({ error: 'No tiene acceso a ningún gimnasio' });
   }
 
-  const selectedTenant = userTenants[0];
-  const payload = {
-    userId: user.id,
-    tenantId: selectedTenant.tenantId,
-    role: selectedTenant.role,
-  };
-  const accessToken = jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
-  const refreshToken = jwt.sign(payload, JWT_REFRESH_SECRET, { expiresIn: '7d' });
+  const currentTenant = userTenants[0];
 
   return res.status(200).json({
-    accessToken,
-    refreshToken,
+    access_token: session.access_token,
+    refresh_token: session.refresh_token,
+    token_type: 'bearer',
+    expires_in: session.expires_in,
     user: { id: user.id, email: user.email },
     tenants: userTenants.map((ut) => ({
-      id: ut.tenant.id,
-      name: ut.tenant.name,
+      id: ut.Tenant?.id ?? ut.tenantId,
+      name: ut.Tenant?.name ?? '',
       role: ut.role,
     })),
     currentTenant: {
-      id: selectedTenant.tenant.id,
-      name: selectedTenant.tenant.name,
-      role: selectedTenant.role,
+      id: currentTenant.Tenant?.id ?? currentTenant.tenantId,
+      name: currentTenant.Tenant?.name ?? '',
+      role: currentTenant.role,
     },
   });
 }
 
-// --- DASHBOARD ---
-const DEMO_DASHBOARD = {
-  members: { total: 5, active: 3, new: 2, newPreviousPeriod: 1, atRisk: 1 },
-  retention: { rate: 80, churnRate: 20, churnCount: 1 },
-  attendance: { today: 4, last30Days: 87, avgPerMember: 5.8 },
-  revenue: { currentMonth: 8500, lastMonth: 7200, projected: 12000, currency: 'MXN' },
-  generatedAt: new Date().toISOString(),
-};
-
+// ---------------------------------------------------------------------------
+// Route: GET /api/dashboard
+// ---------------------------------------------------------------------------
 async function handleDashboard(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  // Return demo data if no database
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     return res.status(200).json({ ...DEMO_DASHBOARD, generatedAt: new Date().toISOString() });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
   const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString();
+  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0).toISOString();
 
   const [
-    activeMemberships,
-    totalMembers,
-    newMembers,
-    newMembersPrev,
-    atRiskMembers,
-    attendanceLast30,
-    attendanceToday,
-    revenueThisMonth,
-    revenueLastMonth,
+    { count: totalMembers },
+    { count: newMembers },
+    { count: newMembersPrev },
+    { count: atRiskMembers },
+    { count: attendanceLast30 },
+    { count: attendanceToday },
+    { data: activeMemberships },
+    { data: revenueThisMonthRows },
+    { data: revenueLastMonthRows },
   ] = await Promise.all([
-    db.membership.findMany({
-      where: { tenantId, status: 'ACTIVE', endDate: { gte: now } },
-      select: { memberId: true },
-      distinct: ['memberId'],
-    }),
-    db.member.count({ where: { tenantId, isActive: true } }),
-    db.member.count({ where: { tenantId, createdAt: { gte: thirtyDaysAgo } } }),
-    db.member.count({ where: { tenantId, createdAt: { gte: sixtyDaysAgo, lt: thirtyDaysAgo } } }),
-    db.member.count({ where: { tenantId, isActive: true, riskLevel: 'HIGH' } }),
-    db.attendance.count({ where: { tenantId, timestamp: { gte: thirtyDaysAgo } } }),
-    db.attendance.count({ where: { tenantId, timestamp: { gte: startOfToday } } }),
-    db.payment.aggregate({
-      where: { tenantId, paymentDate: { gte: startOfMonth }, status: 'PAID', isVoided: false },
-      _sum: { amount: true },
-    }),
-    db.payment.aggregate({
-      where: {
-        tenantId,
-        paymentDate: { gte: startOfLastMonth, lte: endOfLastMonth },
-        status: 'PAID',
-        isVoided: false,
-      },
-      _sum: { amount: true },
-    }),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('isActive', true),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).gte('createdAt', thirtyDaysAgo),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).gte('createdAt', sixtyDaysAgo).lt('createdAt', thirtyDaysAgo),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('isActive', true).eq('riskLevel', 'HIGH'),
+    supabase.from('Attendance').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).gte('timestamp', thirtyDaysAgo),
+    supabase.from('Attendance').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).gte('timestamp', startOfToday),
+    supabase.from('Membership').select('memberId').eq('tenantId', tenantId).eq('status', 'ACTIVE').gte('endDate', now.toISOString()),
+    supabase.from('Payment').select('amount').eq('tenantId', tenantId).gte('paymentDate', startOfMonth).eq('status', 'PAID').eq('isVoided', false),
+    supabase.from('Payment').select('amount').eq('tenantId', tenantId).gte('paymentDate', startOfLastMonth).lte('paymentDate', endOfLastMonth).eq('status', 'PAID').eq('isVoided', false),
   ]);
 
-  const activeMemberCount = activeMemberships.length;
-  const avgAttendancePerMember =
-    activeMemberCount > 0
-      ? Math.round((attendanceLast30 / activeMemberCount) * 10) / 10
-      : 0;
-  const currentRevenue = Number(revenueThisMonth._sum.amount || 0);
-  const lastMonthRev = Number(revenueLastMonth._sum.amount || 0);
+  const uniqueActiveMembers = new Set((activeMemberships || []).map((m) => m.memberId)).size;
+  const currentRevenue = (revenueThisMonthRows || []).reduce((s, r) => s + Number(r.amount || 0), 0);
+  const lastMonthRev = (revenueLastMonthRows || []).reduce((s, r) => s + Number(r.amount || 0), 0);
   const dayOfMonth = now.getDate();
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-  const projectedRevenue =
-    dayOfMonth > 0
-      ? Math.round((currentRevenue / dayOfMonth) * daysInMonth * 100) / 100
-      : 0;
+  const projectedRevenue = dayOfMonth > 0 ? Math.round((currentRevenue / dayOfMonth) * daysInMonth * 100) / 100 : 0;
+  const avgPerMember = uniqueActiveMembers > 0 ? Math.round(((attendanceLast30 || 0) / uniqueActiveMembers) * 10) / 10 : 0;
 
   return res.status(200).json({
     members: {
-      total: totalMembers,
-      active: activeMemberCount,
-      new: newMembers,
-      newPreviousPeriod: newMembersPrev,
-      atRisk: atRiskMembers,
+      total: totalMembers || 0,
+      active: uniqueActiveMembers,
+      new: newMembers || 0,
+      newPreviousPeriod: newMembersPrev || 0,
+      atRisk: atRiskMembers || 0,
     },
     retention: { rate: 0, churnRate: 0, churnCount: 0 },
     attendance: {
-      today: attendanceToday,
-      last30Days: attendanceLast30,
-      avgPerMember: avgAttendancePerMember,
+      today: attendanceToday || 0,
+      last30Days: attendanceLast30 || 0,
+      avgPerMember,
     },
     revenue: {
       currentMonth: currentRevenue,
@@ -440,15 +425,9 @@ async function handleDashboard(req, res) {
   });
 }
 
-// --- MEMBERS ---
-const DEMO_MEMBERS = [
-  { id: 'member-001', firstName: 'María', lastName: 'González', phone: '+5215512345678', email: 'maria@email.com', isActive: true, pointsBalance: 150, riskLevel: 'LOW', createdAt: new Date('2024-01-15'), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Premium', price: 899, currency: 'MXN' } }] },
-  { id: 'member-002', firstName: 'Carlos', lastName: 'Hernández', phone: '+5215587654321', email: 'carlos@email.com', isActive: true, pointsBalance: 320, riskLevel: 'MEDIUM', createdAt: new Date('2024-02-10'), memberships: [{ status: 'ACTIVE', plan: { name: 'Trimestral', price: 2299, currency: 'MXN' } }] },
-  { id: 'member-003', firstName: 'Ana', lastName: 'López', phone: '+5215511223344', email: 'ana@email.com', isActive: true, pointsBalance: 80, riskLevel: 'LOW', createdAt: new Date('2024-03-05'), memberships: [{ status: 'ACTIVE', plan: { name: 'Mensual Básico', price: 599, currency: 'MXN' } }] },
-  { id: 'member-004', firstName: 'Roberto', lastName: 'Martínez', phone: '+5215599887766', email: 'roberto@email.com', isActive: true, pointsBalance: 0, riskLevel: null, createdAt: new Date('2024-04-20'), memberships: [] },
-  { id: 'member-005', firstName: 'Laura', lastName: 'Ramírez', phone: '+5215544556677', email: 'laura@email.com', isActive: true, pointsBalance: 500, riskLevel: 'HIGH', createdAt: new Date('2024-01-01'), memberships: [{ status: 'ACTIVE', plan: { name: 'Anual VIP', price: 7999, currency: 'MXN' } }] },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/members
+// ---------------------------------------------------------------------------
 function generateReferralCode() {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let result = '';
@@ -457,74 +436,60 @@ function generateReferralCode() {
 }
 
 async function handleMembers(req, res) {
-  const user = requireAuth(req, res);
+  const user = await requireAuth(req, res);
   if (!user) return;
 
-  // Return demo data if no database
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') {
       return res.status(200).json({ data: DEMO_MEMBERS, pagination: { total: DEMO_MEMBERS.length, page: 1, limit: 20, totalPages: 1 } });
     }
     if (req.method === 'POST') {
       const { firstName, lastName, phone } = req.body || {};
       if (!firstName || !lastName || !phone) return res.status(400).json({ error: 'Nombre, apellido y teléfono son requeridos' });
-      const newMember = { id: `member-${Date.now()}`, firstName, lastName, phone, isActive: true, pointsBalance: 0, createdAt: new Date(), memberships: [] };
-      return res.status(201).json(newMember);
+      return res.status(201).json({ id: `member-${Date.now()}`, firstName, lastName, phone, isActive: true, pointsBalance: 0, createdAt: new Date().toISOString(), memberships: [] });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
     const { search = '', page = '1', limit = '20', active } = req.query || {};
     const pageNum = Math.max(1, parseInt(page) || 1);
     const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
-    const skip = (pageNum - 1) * limitNum;
+    const from = (pageNum - 1) * limitNum;
+    const to = from + limitNum - 1;
 
-    const where = { tenantId };
-    if (active !== undefined) where.isActive = active === 'true';
+    let query = supabase
+      .from('Member')
+      .select('*, Membership(status, Plan(name, price, currency))', { count: 'exact' })
+      .eq('tenantId', tenantId)
+      .order('createdAt', { ascending: false })
+      .range(from, to);
+
+    if (active !== undefined) query = query.eq('isActive', active === 'true');
     if (search && search.trim()) {
       const term = search.trim();
-      where.OR = [
-        { firstName: { contains: term, mode: 'insensitive' } },
-        { lastName: { contains: term, mode: 'insensitive' } },
-        { phone: { contains: term } },
-        { email: { contains: term, mode: 'insensitive' } },
-      ];
+      query = query.or(`firstName.ilike.%${term}%,lastName.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%`);
     }
 
-    const [members, total] = await Promise.all([
-      db.member.findMany({
-        where,
-        skip,
-        take: limitNum,
-        orderBy: { createdAt: 'desc' },
-        include: {
-          memberships: {
-            where: { status: 'ACTIVE' },
-            include: { plan: true },
-            take: 1,
-          },
-        },
-      }),
-      db.member.count({ where }),
-    ]);
+    const { data: members, count, error } = await query;
+    if (error) throw error;
 
     return res.status(200).json({
-      data: members,
+      data: members || [],
       pagination: {
-        total,
+        total: count || 0,
         page: pageNum,
         limit: limitNum,
-        totalPages: Math.ceil(total / limitNum),
+        totalPages: Math.ceil((count || 0) / limitNum),
       },
     });
   }
 
   if (req.method === 'POST') {
-    const adminUser = requireRole(req, res, ['OWNER', 'ADMIN']);
+    const adminUser = await requireRole(req, res, ['OWNER', 'ADMIN']);
     if (!adminUser) return;
 
     const { firstName, lastName, phone, email, dateOfBirth, marketingConsent } = req.body || {};
@@ -532,44 +497,50 @@ async function handleMembers(req, res) {
       return res.status(400).json({ error: 'Nombre, apellido y teléfono son requeridos' });
     }
 
-    const existing = await db.member.findUnique({
-      where: { tenantId_phone: { tenantId, phone } },
-    });
+    // Check for duplicate phone within tenant
+    const { data: existing } = await supabase
+      .from('Member')
+      .select('id')
+      .eq('tenantId', tenantId)
+      .eq('phone', phone)
+      .maybeSingle();
+
     if (existing) return res.status(409).json({ error: 'Ya existe un socio con este teléfono' });
 
-    const member = await db.member.create({
-      data: {
+    const { data: member, error } = await supabase
+      .from('Member')
+      .insert({
         tenantId,
         firstName,
         lastName,
         phone,
         email: email || null,
-        dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+        dateOfBirth: dateOfBirth || null,
         marketingConsent: !!marketingConsent,
-        marketingConsentDate: marketingConsent ? new Date() : null,
+        marketingConsentDate: marketingConsent ? new Date().toISOString() : null,
         marketingConsentChannel: marketingConsent ? 'REGISTRATION' : null,
         referralCode: generateReferralCode(),
-      },
-    });
+        isActive: true,
+        pointsBalance: 0,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(member);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- PLANS ---
-const DEMO_PLANS = [
-  { id: 'plan-001', name: 'Mensual Básico', description: 'Acceso de lunes a viernes', durationDays: 30, price: 599, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
-  { id: 'plan-002', name: 'Mensual Premium', description: 'Acceso completo + clases grupales', durationDays: 30, price: 899, currency: 'MXN', isArchived: false, _count: { memberships: 2 } },
-  { id: 'plan-003', name: 'Trimestral', description: 'Acceso completo por 3 meses', durationDays: 90, price: 2299, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
-  { id: 'plan-004', name: 'Anual VIP', description: 'Acceso ilimitado + clases + nutriólogo', durationDays: 365, price: 7999, currency: 'MXN', isArchived: false, _count: { memberships: 1 } },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/plans
+// ---------------------------------------------------------------------------
 async function handlePlans(req, res) {
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') return res.status(200).json({ data: DEMO_PLANS });
     if (req.method === 'POST') {
       const { name, durationDays, price, currency = 'MXN' } = req.body || {};
@@ -579,16 +550,27 @@ async function handlePlans(req, res) {
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
-    const plans = await db.plan.findMany({
-      where: { tenantId, isArchived: false },
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { memberships: { where: { status: 'ACTIVE' } } } } },
-    });
-    return res.status(200).json({ data: plans });
+    const { data: plans, error } = await supabase
+      .from('Plan')
+      .select('*, Membership(id)')
+      .eq('tenantId', tenantId)
+      .eq('isArchived', false)
+      .order('createdAt', { ascending: false });
+
+    if (error) throw error;
+
+    // Attach active membership count
+    const enriched = (plans || []).map((p) => ({
+      ...p,
+      membershipCount: (p.Membership || []).length,
+      Membership: undefined,
+    }));
+
+    return res.status(200).json({ data: enriched });
   }
 
   if (req.method === 'POST') {
@@ -596,128 +578,148 @@ async function handlePlans(req, res) {
     if (!name || !durationDays || price === undefined) {
       return res.status(400).json({ error: 'Nombre, duración y precio son requeridos' });
     }
-    const plan = await db.plan.create({
-      data: {
+
+    const { data: plan, error } = await supabase
+      .from('Plan')
+      .insert({
         tenantId,
         name,
         description: description || null,
         durationDays: parseInt(durationDays),
         price: parseFloat(price),
         currency,
-      },
-    });
+        isArchived: false,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(plan);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- ATTENDANCES ---
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/attendances
+// ---------------------------------------------------------------------------
 async function handleAttendances(req, res) {
-  const user = requireAuth(req, res);
+  const user = await requireAuth(req, res);
   if (!user) return;
 
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') return res.status(200).json({ data: [] });
     if (req.method === 'POST') {
       const { memberId } = req.body || {};
-      const member = DEMO_MEMBERS.find(m => m.id === memberId) || DEMO_MEMBERS[0];
-      return res.status(201).json({ id: `att-${Date.now()}`, memberId: member.id, timestamp: new Date(), method: 'MANUAL', member: { firstName: member.firstName, lastName: member.lastName } });
+      const member = DEMO_MEMBERS.find((m) => m.id === memberId) || DEMO_MEMBERS[0];
+      return res.status(201).json({ id: `att-${Date.now()}`, memberId: member.id, timestamp: new Date().toISOString(), method: 'MANUAL', member: { firstName: member.firstName, lastName: member.lastName } });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'POST') {
     const { memberId, qrCode } = req.body || {};
-    let member;
-    if (memberId) {
-      member = await db.member.findFirst({ where: { id: memberId, tenantId, isActive: true } });
-    } else if (qrCode) {
-      member = await db.member.findFirst({ where: { qrCode, tenantId, isActive: true } });
-    } else {
-      return res.status(400).json({ error: 'memberId o qrCode requerido' });
-    }
 
+    let memberQuery = supabase.from('Member').select('id, firstName, lastName').eq('tenantId', tenantId).eq('isActive', true);
+    if (memberId) memberQuery = memberQuery.eq('id', memberId);
+    else if (qrCode) memberQuery = memberQuery.eq('qrCode', qrCode);
+    else return res.status(400).json({ error: 'memberId o qrCode requerido' });
+
+    const { data: member } = await memberQuery.maybeSingle();
     if (!member) return res.status(404).json({ error: 'Socio no encontrado o inactivo' });
 
-    const tenant = await db.tenant.findUnique({ where: { id: tenantId } });
+    // Get attendance window from tenant settings (default 30 min)
+    const { data: tenant } = await supabase.from('Tenant').select('attendanceWindowMinutes').eq('id', tenantId).maybeSingle();
     const windowMinutes = tenant?.attendanceWindowMinutes || 30;
-    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000);
+    const windowStart = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
 
-    const recent = await db.attendance.findFirst({
-      where: { tenantId, memberId: member.id, timestamp: { gte: windowStart } },
-    });
+    const { data: recent } = await supabase
+      .from('Attendance')
+      .select('id')
+      .eq('tenantId', tenantId)
+      .eq('memberId', member.id)
+      .gte('timestamp', windowStart)
+      .maybeSingle();
+
     if (recent) {
-      return res.status(409).json({
-        error: `Ya se registró asistencia en los últimos ${windowMinutes} minutos`,
-      });
+      return res.status(409).json({ error: `Ya se registró asistencia en los últimos ${windowMinutes} minutos` });
     }
 
-    const attendance = await db.attendance.create({
-      data: {
+    const { data: attendance, error } = await supabase
+      .from('Attendance')
+      .insert({
         tenantId,
         memberId: member.id,
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
         method: qrCode ? 'QR' : 'MANUAL',
-      },
-    });
-    return res.status(201).json({
-      ...attendance,
-      member: { firstName: member.firstName, lastName: member.lastName },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return res.status(201).json({ ...attendance, member: { firstName: member.firstName, lastName: member.lastName } });
   }
 
   if (req.method === 'GET') {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const attendances = await db.attendance.findMany({
-      where: { tenantId, timestamp: { gte: today } },
-      orderBy: { timestamp: 'desc' },
-      include: { member: { select: { firstName: true, lastName: true } } },
-      take: 50,
-    });
-    return res.status(200).json({ data: attendances });
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const { data: attendances, error } = await supabase
+      .from('Attendance')
+      .select('*, Member(firstName, lastName)')
+      .eq('tenantId', tenantId)
+      .gte('timestamp', startOfToday.toISOString())
+      .order('timestamp', { ascending: false })
+      .limit(50);
+
+    if (error) throw error;
+    return res.status(200).json({ data: attendances || [] });
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- CAMPAIGNS ---
-const DEMO_CAMPAIGNS = [
-  { id: 'camp-001', name: 'Reactivación Socios Inactivos', objective: 'Recuperar socios que no han venido en 2 semanas', type: 'REMINDER', status: 'DRAFT', templateName: 'reactivacion_v1', frequency: 'ONCE', startAt: new Date(), createdAt: new Date(), segment: { id: 'seg-001', name: 'Inactivos 14+ días' }, _count: { executions: 0 } },
-  { id: 'camp-002', name: 'Felicitación de Cumpleaños', objective: 'Enviar saludo y beneficio en cumpleaños', type: 'BIRTHDAY', status: 'RUNNING', templateName: 'cumpleanos_v1', frequency: 'DAILY', startAt: new Date(), createdAt: new Date(), segment: null, _count: { executions: 3 } },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/campaigns
+// ---------------------------------------------------------------------------
 async function handleCampaigns(req, res) {
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') return res.status(200).json({ data: DEMO_CAMPAIGNS, pagination: { total: DEMO_CAMPAIGNS.length } });
     if (req.method === 'POST') {
       const { name, objective, type, templateName, frequency, startAt } = req.body || {};
       if (!name || !type) return res.status(400).json({ error: 'Faltan campos requeridos' });
-      return res.status(201).json({ id: `camp-${Date.now()}`, name, objective, type, templateName, frequency, startAt, status: 'DRAFT', createdAt: new Date() });
+      return res.status(201).json({ id: `camp-${Date.now()}`, name, objective, type, templateName, frequency, startAt, status: 'DRAFT', createdAt: new Date().toISOString() });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
-    const campaigns = await db.campaign.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        segment: { select: { id: true, name: true } },
-        _count: { select: { executions: true } },
-      },
-    });
-    return res.status(200).json({ data: campaigns, pagination: { total: campaigns.length } });
+    const { data: campaigns, error } = await supabase
+      .from('Campaign')
+      .select('*, Segment(id, name), CampaignExecution(id)')
+      .eq('tenantId', tenantId)
+      .order('createdAt', { ascending: false });
+
+    if (error) throw error;
+
+    const enriched = (campaigns || []).map((c) => ({
+      ...c,
+      segment: c.Segment || null,
+      executionCount: (c.CampaignExecution || []).length,
+      Segment: undefined,
+      CampaignExecution: undefined,
+    }));
+
+    return res.status(200).json({ data: enriched, pagination: { total: enriched.length } });
   }
 
   if (req.method === 'POST') {
@@ -731,8 +733,9 @@ async function handleCampaigns(req, res) {
       return res.status(400).json({ error: 'Faltan campos requeridos' });
     }
 
-    const campaign = await db.campaign.create({
-      data: {
+    const { data: campaign, error } = await supabase
+      .from('Campaign')
+      .insert({
         tenantId,
         name,
         objective,
@@ -741,363 +744,350 @@ async function handleCampaigns(req, res) {
         templateName,
         templateLanguage,
         frequency,
-        startAt: new Date(startAt),
-        endAt: endAt ? new Date(endAt) : null,
+        startAt,
+        endAt: endAt || null,
         attributionDays: parseInt(attributionDays),
         config: config || null,
         status: 'DRAFT',
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(campaign);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- SEGMENTS ---
-const DEMO_SEGMENTS = [
-  { id: 'seg-001', name: 'Inactivos 14+ días', criteria: { lastAttendanceDaysAgo: 14, membershipStatus: 'ACTIVE' }, createdAt: new Date(), _count: { campaigns: 1 } },
-  { id: 'seg-002', name: 'Socios en riesgo alto', criteria: { riskLevel: 'HIGH' }, createdAt: new Date(), _count: { campaigns: 0 } },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/segments
+// ---------------------------------------------------------------------------
 async function handleSegments(req, res) {
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') return res.status(200).json({ data: DEMO_SEGMENTS });
     if (req.method === 'POST') {
       const { name, criteria } = req.body || {};
       if (!name) return res.status(400).json({ error: 'Nombre requerido' });
-      return res.status(201).json({ id: `seg-${Date.now()}`, name, criteria: criteria || {}, createdAt: new Date() });
+      return res.status(201).json({ id: `seg-${Date.now()}`, name, criteria: criteria || {}, createdAt: new Date().toISOString() });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
-    const segments = await db.segment.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { campaigns: true } } },
-    });
-    return res.status(200).json({ data: segments });
+    const { data: segments, error } = await supabase
+      .from('Segment')
+      .select('*, Campaign(id)')
+      .eq('tenantId', tenantId)
+      .order('createdAt', { ascending: false });
+
+    if (error) throw error;
+
+    const enriched = (segments || []).map((s) => ({
+      ...s,
+      campaignCount: (s.Campaign || []).length,
+      Campaign: undefined,
+    }));
+
+    return res.status(200).json({ data: enriched });
   }
 
   if (req.method === 'POST') {
     const { name, criteria } = req.body || {};
     if (!name) return res.status(400).json({ error: 'Nombre requerido' });
-    const segment = await db.segment.create({
-      data: { tenantId, name, criteria: criteria || {} },
-    });
+
+    const { data: segment, error } = await supabase
+      .from('Segment')
+      .insert({ tenantId, name, criteria: criteria || {} })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(segment);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- PAYMENTS ---
-const DEMO_PAYMENTS = [
-  { id: 'pay-001', amount: 899, currency: 'MXN', paymentDate: new Date(), method: 'CASH', status: 'PAID', isVoided: false, membership: { member: { firstName: 'María', lastName: 'González' }, plan: { name: 'Mensual Premium' } } },
-  { id: 'pay-002', amount: 2299, currency: 'MXN', paymentDate: new Date(Date.now() - 86400000 * 5), method: 'BANK_TRANSFER', status: 'PAID', isVoided: false, membership: { member: { firstName: 'Carlos', lastName: 'Hernández' }, plan: { name: 'Trimestral' } } },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/payments
+// ---------------------------------------------------------------------------
 async function handlePayments(req, res) {
-  const user = requireAuth(req, res);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
-    if (req.method === 'GET') return res.status(200).json({ data: DEMO_PAYMENTS });
+  if (IS_DEMO_MODE || user.isDemo) {
+    if (req.method === 'GET') return res.status(200).json({ data: DEMO_PAYMENTS, pagination: { total: DEMO_PAYMENTS.length } });
     if (req.method === 'POST') {
-      const { amount, method, status = 'PAID' } = req.body || {};
-      if (!amount || !method) return res.status(400).json({ error: 'Faltan campos requeridos' });
-      return res.status(201).json({ id: `pay-${Date.now()}`, amount: parseFloat(amount), currency: 'MXN', paymentDate: new Date(), method, status });
+      const { memberId, amount, currency = 'MXN' } = req.body || {};
+      if (!memberId || amount === undefined) return res.status(400).json({ error: 'memberId y amount son requeridos' });
+      return res.status(201).json({ id: `pay-${Date.now()}`, memberId, amount: parseFloat(amount), currency, status: 'PAID', paymentDate: new Date().toISOString() });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
-    const payments = await db.payment.findMany({
-      where: { tenantId },
-      orderBy: { paymentDate: 'desc' },
-      take: 100,
-      include: {
-        membership: {
-          include: {
-            member: { select: { firstName: true, lastName: true } },
-            plan: { select: { name: true } },
-          },
-        },
+    const { page = '1', limit = '20', memberId } = req.query || {};
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const from = (pageNum - 1) * limitNum;
+    const to = from + limitNum - 1;
+
+    let query = supabase
+      .from('Payment')
+      .select('*, Member(firstName, lastName)', { count: 'exact' })
+      .eq('tenantId', tenantId)
+      .order('paymentDate', { ascending: false })
+      .range(from, to);
+
+    if (memberId) query = query.eq('memberId', memberId);
+
+    const { data: payments, count, error } = await query;
+    if (error) throw error;
+
+    return res.status(200).json({
+      data: payments || [],
+      pagination: {
+        total: count || 0,
+        page: pageNum,
+        limit: limitNum,
+        totalPages: Math.ceil((count || 0) / limitNum),
       },
     });
-    return res.status(200).json({ data: payments });
   }
 
   if (req.method === 'POST') {
-    const { membershipId, amount, currency = 'MXN', paymentDate, method, status = 'PAID' } =
-      req.body || {};
-    if (!membershipId || !amount || !method) {
-      return res.status(400).json({ error: 'Faltan campos requeridos' });
+    const { memberId, membershipId, amount, currency = 'MXN', paymentMethod, notes } = req.body || {};
+    if (!memberId || amount === undefined) {
+      return res.status(400).json({ error: 'memberId y amount son requeridos' });
     }
-    const payment = await db.payment.create({
-      data: {
+
+    const { data: payment, error } = await supabase
+      .from('Payment')
+      .insert({
         tenantId,
-        membershipId,
+        memberId,
+        membershipId: membershipId || null,
         amount: parseFloat(amount),
         currency,
-        paymentDate: paymentDate ? new Date(paymentDate) : new Date(),
-        method,
-        status,
-      },
-    });
+        paymentMethod: paymentMethod || 'CASH',
+        notes: notes || null,
+        status: 'PAID',
+        paymentDate: new Date().toISOString(),
+        isVoided: false,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(payment);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- REWARDS ---
-const DEMO_REWARDS = [
-  { id: 'rew-001', name: 'Clase de yoga gratis', pointsCost: 100, stock: 20, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 180), isActive: true, _count: { redemptions: 3 } },
-  { id: 'rew-002', name: '10% descuento en renovación', pointsCost: 250, stock: null, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 365), isActive: true, _count: { redemptions: 7 } },
-  { id: 'rew-003', name: 'Playera GymFit', pointsCost: 500, stock: 10, startDate: new Date(), endDate: new Date(Date.now() + 86400000 * 180), isActive: true, _count: { redemptions: 2 } },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET/POST /api/rewards
+// ---------------------------------------------------------------------------
 async function handleRewards(req, res) {
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
+  if (IS_DEMO_MODE || user.isDemo) {
     if (req.method === 'GET') return res.status(200).json({ data: DEMO_REWARDS });
     if (req.method === 'POST') {
-      const { name, pointsCost, startDate, endDate } = req.body || {};
-      if (!name || !pointsCost || !startDate || !endDate) return res.status(400).json({ error: 'Faltan campos requeridos' });
-      return res.status(201).json({ id: `rew-${Date.now()}`, name, pointsCost: parseInt(pointsCost), stock: null, startDate: new Date(startDate), endDate: new Date(endDate), isActive: true });
+      const { name, description, pointsCost, stock } = req.body || {};
+      if (!name || pointsCost === undefined) return res.status(400).json({ error: 'Nombre y costo en puntos son requeridos' });
+      return res.status(201).json({ id: `rew-${Date.now()}`, name, description, pointsCost: parseInt(pointsCost), stock: stock ?? null, isActive: true, createdAt: new Date().toISOString() });
     }
     return res.status(405).json({ error: 'Método no permitido' });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
   if (req.method === 'GET') {
-    const rewards = await db.reward.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { redemptions: true } } },
-    });
-    return res.status(200).json({ data: rewards });
+    const { data: rewards, error } = await supabase
+      .from('Reward')
+      .select('*')
+      .eq('tenantId', tenantId)
+      .order('createdAt', { ascending: false });
+
+    if (error) throw error;
+    return res.status(200).json({ data: rewards || [] });
   }
 
   if (req.method === 'POST') {
-    const { name, pointsCost, stock, startDate, endDate, isActive = true } = req.body || {};
-    if (!name || !pointsCost || !startDate || !endDate) {
-      return res.status(400).json({ error: 'Nombre, costo en puntos y fechas son requeridos' });
+    const { name, description, pointsCost, stock, imageUrl } = req.body || {};
+    if (!name || pointsCost === undefined) {
+      return res.status(400).json({ error: 'Nombre y costo en puntos son requeridos' });
     }
-    const reward = await db.reward.create({
-      data: {
+
+    const { data: reward, error } = await supabase
+      .from('Reward')
+      .insert({
         tenantId,
         name,
+        description: description || null,
         pointsCost: parseInt(pointsCost),
-        stock: stock !== undefined && stock !== null ? parseInt(stock) : null,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
-        isActive: !!isActive,
-      },
-    });
+        stock: stock !== undefined ? parseInt(stock) : null,
+        imageUrl: imageUrl || null,
+        isActive: true,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
     return res.status(201).json(reward);
   }
 
   return res.status(405).json({ error: 'Método no permitido' });
 }
 
-// --- ALERTS ---
-const DEMO_ALERTS = [
-  { id: 'alert-001', type: 'RISK', title: 'Socio en riesgo alto', message: 'Laura Ramírez no ha asistido en 12 días y su membresía vence pronto', isRead: false, createdAt: new Date(Date.now() - 3600000) },
-  { id: 'alert-002', type: 'INFO', title: 'Campaña completada', message: 'La campaña "Reactivación Mayo" fue enviada a 23 socios con 34% de apertura', isRead: true, createdAt: new Date(Date.now() - 86400000) },
-];
-
+// ---------------------------------------------------------------------------
+// Route: GET /api/alerts
+// ---------------------------------------------------------------------------
 async function handleAlerts(req, res) {
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
-  if (!DATABASE_URL) {
-    if (req.method === 'GET') return res.status(200).json({ data: DEMO_ALERTS, unreadCount: DEMO_ALERTS.filter(a => !a.isRead).length });
-    return res.status(405).json({ error: 'Método no permitido' });
+  if (IS_DEMO_MODE || user.isDemo) {
+    return res.status(200).json({ data: DEMO_ALERTS, unreadCount: DEMO_ALERTS.filter((a) => !a.isRead).length });
   }
 
-  const db = getPrisma();
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
-  if (req.method === 'GET') {
-    const alerts = await db.alert.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-    const unreadCount = await db.alert.count({ where: { tenantId, isRead: false } });
-    return res.status(200).json({ data: alerts, unreadCount });
-  }
+  const { data: alerts, error } = await supabase
+    .from('Alert')
+    .select('*')
+    .eq('tenantId', tenantId)
+    .order('createdAt', { ascending: false })
+    .limit(50);
 
-  return res.status(405).json({ error: 'Método no permitido' });
+  if (error) throw error;
+
+  const unreadCount = (alerts || []).filter((a) => !a.isRead).length;
+  return res.status(200).json({ data: alerts || [], unreadCount });
 }
 
 // ---------------------------------------------------------------------------
-// AI route handlers
+// AI Routes
 // ---------------------------------------------------------------------------
 
-const AI_INSIGHTS_SYSTEM_PROMPT = `Eres un consultor de negocios experto en gimnasios. Analiza las métricas globales y genera insights ejecutivos accionables.
-
-Responde con un objeto JSON con esta estructura:
-
-{
-  "summary": "string (resumen ejecutivo del estado del gimnasio, 2-3 oraciones, max 300 chars)",
-  "healthScore": number (0-100, salud general del negocio),
-  "strengths": [array de 2-3 fortalezas detectadas, max 100 chars cada una],
-  "concerns": [array de 2-3 puntos de atención, max 100 chars cada uno],
-  "opportunities": [
-    {
-      "title": "string (oportunidad detectada, max 80 chars)",
-      "description": "string (max 200 chars)",
-      "expectedImpact": "string (impacto en MXN o %, ej: '+$15,000/mes')",
-      "priority": "alta" | "media" | "baja",
-      "actionType": "campaña" | "recompensa" | "operativo" | "marketing"
-    }
+// --- GET /api/ai/insights ---
+const DEMO_AI_INSIGHTS = {
+  summary: 'Tu gimnasio tiene un buen desempeño general. La retención está en 80% y los ingresos crecieron 18% respecto al mes anterior.',
+  insights: [
+    { type: 'retention', title: 'Retención estable', description: 'El 80% de los socios renuevan su membresía. El promedio del sector es 72%.', impact: 'positive', priority: 1 },
+    { type: 'attendance', title: 'Asistencia en descenso los lunes', description: 'Los lunes tienen 35% menos asistencia que el promedio semanal. Considera una promoción especial.', impact: 'warning', priority: 2 },
+    { type: 'revenue', title: 'Oportunidad de upsell', description: '3 socios del plan Básico asisten más de 20 veces al mes. Son candidatos ideales para el plan Premium.', impact: 'opportunity', priority: 3 },
+    { type: 'churn', title: 'Socios en riesgo', description: '1 socio no ha asistido en más de 14 días y tiene membresía activa. Acción recomendada: mensaje de reactivación.', impact: 'negative', priority: 4 },
   ],
-  "predictions": {
-    "nextMonthRevenue": "string (rango ej: '$45,000-$55,000')",
-    "churnRisk": "string (% socios en riesgo, ej: '12-18%')",
-    "growthOpportunity": "string (% crecimiento posible, ej: '+15-25%')"
-  },
-  "topPriority": {
-    "action": "string (acción más importante a tomar HOY)",
-    "rationale": "string (por qué es prioridad #1)"
-  }
-}
-
-Sé directo, concreto y orientado a la acción. Habla como un consultor experimentado.`;
+  recommendations: [
+    'Lanza una campaña de reactivación para socios inactivos esta semana',
+    'Ofrece upgrade al plan Premium a los socios de alto uso',
+    'Implementa una clase especial los lunes para aumentar asistencia',
+  ],
+  generatedAt: new Date().toISOString(),
+  isDemo: true,
+};
 
 async function handleAIInsights(req, res) {
   if (req.method !== 'GET') return res.status(405).json({ error: 'Método no permitido' });
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
   if (!isAIEnabled()) {
-    return res.status(503).json({
-      error: 'IA no configurada',
-      hint: 'Configura OPENAI_API_KEY en las variables de entorno de Vercel',
-    });
+    return res.status(200).json({ ...DEMO_AI_INSIGHTS, generatedAt: new Date().toISOString() });
   }
 
-  const db = getPrisma();
+  if (IS_DEMO_MODE || user.isDemo) {
+    return res.status(200).json({ ...DEMO_AI_INSIGHTS, generatedAt: new Date().toISOString() });
+  }
+
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
   const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 86400000);
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
   const [
-    activeMemberships,
-    totalMembers,
-    newMembers,
-    atRiskMembers,
-    attendanceLast30,
-    revenueThisMonth,
-    revenueLastMonth,
-    activeCampaigns,
-    pointMovements,
-    redemptions,
-    avgPlan,
+    { count: totalMembers },
+    { count: activeMembers },
+    { count: atRiskMembers },
+    { count: attendanceLast30 },
+    { data: revenueRows },
   ] = await Promise.all([
-    db.membership.count({ where: { tenantId, status: 'ACTIVE' } }),
-    db.member.count({ where: { tenantId, isActive: true } }),
-    db.member.count({ where: { tenantId, createdAt: { gte: thirtyDaysAgo } } }),
-    db.member.count({ where: { tenantId, isActive: true, riskLevel: 'HIGH' } }),
-    db.attendance.count({ where: { tenantId, timestamp: { gte: thirtyDaysAgo } } }),
-    db.payment.aggregate({
-      where: { tenantId, paymentDate: { gte: startOfMonth }, status: 'PAID', isVoided: false },
-      _sum: { amount: true },
-    }),
-    db.payment.aggregate({
-      where: {
-        tenantId,
-        paymentDate: { gte: startOfLastMonth, lte: endOfLastMonth },
-        status: 'PAID',
-        isVoided: false,
-      },
-      _sum: { amount: true },
-    }),
-    db.campaign.count({ where: { tenantId, status: { in: ['RUNNING', 'SCHEDULED'] } } }),
-    db.pointMovement.count({ where: { tenantId, createdAt: { gte: thirtyDaysAgo } } }),
-    db.redemption.count({ where: { tenantId, redeemedAt: { gte: thirtyDaysAgo } } }),
-    db.plan.aggregate({ where: { tenantId, isArchived: false }, _avg: { price: true } }),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('isActive', true),
+    supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('riskLevel', 'HIGH'),
+    supabase.from('Attendance').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).gte('timestamp', thirtyDaysAgo),
+    supabase.from('Payment').select('amount').eq('tenantId', tenantId).gte('paymentDate', thirtyDaysAgo).eq('status', 'PAID').eq('isVoided', false),
   ]);
 
-  const metrics = {
-    sociosActivos: totalMembers,
-    membresiasActivas: activeMemberships,
-    nuevosSocios30Dias: newMembers,
-    sociosEnRiesgoAlto: atRiskMembers,
-    asistencias30Dias: attendanceLast30,
-    asistenciasPromedioPorSocio:
-      totalMembers > 0 ? Math.round((attendanceLast30 / totalMembers) * 10) / 10 : 0,
-    ingresosMesActual: Number(revenueThisMonth._sum.amount || 0),
-    ingresosMesAnterior: Number(revenueLastMonth._sum.amount || 0),
-    campanasActivas: activeCampaigns,
-    movimientosPuntos30Dias: pointMovements,
-    canjesRecompensas30Dias: redemptions,
-    precioPromedioPlan: Number(avgPlan._avg.price || 0),
-  };
+  const totalRevenue = (revenueRows || []).reduce((s, r) => s + Number(r.amount || 0), 0);
 
-  const userPrompt = `Analiza estas métricas del gimnasio y genera insights ejecutivos:\n\n${JSON.stringify(metrics, null, 2)}\n\nGenera la respuesta en formato JSON según el schema indicado.`;
-
-  const insights = await callAI(AI_INSIGHTS_SYSTEM_PROMPT, userPrompt, {
-    temperature: 0.5,
-    maxTokens: 2000,
-    jsonMode: true,
-  });
-
-  return res.status(200).json({
-    success: true,
-    generatedAt: now.toISOString(),
-    metrics,
-    insights,
-  });
-}
-
-const AI_CAMPAIGN_SYSTEM_PROMPT = `Eres un experto en marketing y fidelización de gimnasios. Tu tarea es ayudar a crear campañas de WhatsApp efectivas.
-
-Cuando el usuario describa una campaña en lenguaje natural, debes responder con un objeto JSON con esta estructura exacta:
-
+  const systemPrompt = `Eres un analista experto en gimnasios y programas de fidelización. Analiza los datos del gimnasio y genera insights accionables en español mexicano. Responde con un objeto JSON con esta estructura exacta:
 {
-  "campaignName": "string (nombre corto y descriptivo, max 50 chars)",
-  "objective": "string (descripción del objetivo, max 200 chars)",
-  "campaignType": "REMINDER" | "BIRTHDAY" | "RENEWAL" | "PROMO" | "REFERRAL" | "NPS" | "CUSTOM",
-  "segmentName": "string (nombre del segmento)",
-  "segmentCriteria": {
-    "lastAttendanceDaysAgo": number opcional (días sin asistir),
-    "membershipStatus": "ACTIVE" | "EXPIRED" | "CANCELLED" opcional,
-    "minAge": number opcional,
-    "maxAge": number opcional,
-    "riskLevel": "LOW" | "MEDIUM" | "HIGH" opcional,
-    "tags": [array de strings] opcional
-  },
-  "messageVariants": [
+  "summary": "string (resumen ejecutivo de 2-3 oraciones)",
+  "insights": [
     {
-      "tone": "formal" | "casual" | "motivador" | "urgencia",
-      "message": "string (mensaje WhatsApp con personalización {{firstName}}, max 300 chars)",
-      "predictedConversion": "string (% estimado, ej: '18-25%')"
+      "type": "retention|attendance|revenue|churn|opportunity",
+      "title": "string (max 60 chars)",
+      "description": "string (max 200 chars)",
+      "impact": "positive|negative|warning|opportunity",
+      "priority": number (1-5, 1=más urgente)
     }
   ],
-  "bestSendTime": {
-    "dayOfWeek": "Lunes" | "Martes" | "Miércoles" | "Jueves" | "Viernes" | "Sábado" | "Domingo",
-    "hour": "string (ej: '10:00')",
+  "recommendations": ["array de 3-5 acciones concretas y ejecutables"]
+}`;
+
+  const userPrompt = `Datos del gimnasio (últimos 30 días):
+- Total socios: ${totalMembers || 0}
+- Socios activos: ${activeMembers || 0}
+- Socios en riesgo alto: ${atRiskMembers || 0}
+- Asistencias totales: ${attendanceLast30 || 0}
+- Ingresos totales: $${totalRevenue.toFixed(2)} MXN
+
+Genera 4-6 insights relevantes y 3-5 recomendaciones accionables.`;
+
+  const result = await callAI(systemPrompt, userPrompt, { temperature: 0.5, maxTokens: 1500, jsonMode: true });
+  return res.status(200).json({ ...result, generatedAt: now.toISOString() });
+}
+
+// --- POST /api/ai/campaign-assistant ---
+const AI_CAMPAIGN_SYSTEM_PROMPT = `Eres un experto en marketing para gimnasios y programas de fidelización. Tu tarea es diseñar campañas de WhatsApp efectivas para gimnasios mexicanos.
+
+Responde con un objeto JSON con esta estructura exacta:
+{
+  "campaignName": "string (nombre atractivo, max 60 chars)",
+  "objective": "string (objetivo claro y medible, max 150 chars)",
+  "targetSegment": {
+    "name": "string (nombre del segmento)",
+    "criteria": "string (descripción de los criterios)",
+    "estimatedSize": "string (rango estimado, ej: '20-40 socios')"
+  },
+  "messages": [
+    {
+      "variant": "A|B|C",
+      "tone": "string (ej: 'motivacional', 'urgente', 'amigable')",
+      "text": "string (mensaje WhatsApp completo, max 300 chars, usar {{firstName}} para personalizar)",
+      "cta": "string (llamada a la acción clara)"
+    }
+  ],
+  "timing": {
+    "bestDay": "string (ej: 'Lunes o Martes')",
+    "bestHour": "string (ej: '10:00')",
     "reasoning": "string (por qué esta hora)"
   },
   "expectedResults": {
@@ -1113,12 +1103,11 @@ IMPORTANTE:
 - Los mensajes deben ser cálidos pero profesionales
 - Personaliza con {{firstName}} cuando sea apropiado
 - Incluye 3 variantes de mensaje con tonos diferentes
-- Las predicciones deben ser realistas (no exagerar)
-- Los criterios deben ser implementables con los campos disponibles`;
+- Las predicciones deben ser realistas (no exagerar)`;
 
 async function handleAICampaignAssistant(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
   if (!isAIEnabled()) {
@@ -1133,19 +1122,23 @@ async function handleAICampaignAssistant(req, res) {
     return res.status(400).json({ error: 'Describe la campaña con al menos 10 caracteres' });
   }
 
-  const db = getPrisma();
-  const tenantId = user.tenantId;
+  let totalMembers = 0, activeMemberships = 0, recentCampaigns = [];
 
-  const [totalMembers, activeMemberships, recentCampaigns] = await Promise.all([
-    db.member.count({ where: { tenantId, isActive: true } }),
-    db.membership.count({ where: { tenantId, status: 'ACTIVE' } }),
-    db.campaign.findMany({
-      where: { tenantId },
-      orderBy: { createdAt: 'desc' },
-      take: 5,
-      select: { name: true, type: true, status: true },
-    }),
-  ]);
+  if (!IS_DEMO_MODE && !user.isDemo) {
+    const supabase = getSupabase();
+    const tenantId = user.tenantId;
+    const [tm, am, rc] = await Promise.all([
+      supabase.from('Member').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('isActive', true),
+      supabase.from('Membership').select('*', { count: 'exact', head: true }).eq('tenantId', tenantId).eq('status', 'ACTIVE'),
+      supabase.from('Campaign').select('name, type, status').eq('tenantId', tenantId).order('createdAt', { ascending: false }).limit(5),
+    ]);
+    totalMembers = tm.count || 0;
+    activeMemberships = am.count || 0;
+    recentCampaigns = rc.data || [];
+  } else {
+    totalMembers = 5; activeMemberships = 4;
+    recentCampaigns = [{ name: 'Reactivación', type: 'REMINDER', status: 'DRAFT' }];
+  }
 
   const userPrompt = `Contexto del gimnasio:
 - Total socios activos: ${totalMembers}
@@ -1157,307 +1150,193 @@ Petición del administrador:
 
 Genera la propuesta de campaña en formato JSON.`;
 
-  const result = await callAI(AI_CAMPAIGN_SYSTEM_PROMPT, userPrompt, {
-    temperature: 0.7,
-    maxTokens: 2000,
-    jsonMode: true,
-  });
-
-  return res.status(200).json({
-    success: true,
-    proposal: result,
-    context: { totalMembers, activeMemberships },
-  });
+  const result = await callAI(AI_CAMPAIGN_SYSTEM_PROMPT, userPrompt, { temperature: 0.7, maxTokens: 2000, jsonMode: true });
+  return res.status(200).json({ success: true, proposal: result, context: { totalMembers, activeMemberships } });
 }
 
+// --- POST /api/ai/churn-analysis ---
 const AI_CHURN_SYSTEM_PROMPT = `Eres un analista de retención de gimnasios experto. Tu tarea es analizar perfiles de socios y predecir su riesgo de abandono.
 
 Para cada socio, responde con un objeto JSON con esta estructura:
-
 {
   "riskScore": number (0-100),
   "riskLevel": "LOW" | "MEDIUM" | "HIGH" | "CRITICAL",
-  "topReasons": [array de 2-3 razones principales del riesgo, máximo 80 chars cada una],
+  "topReasons": ["array de 2-3 razones principales del riesgo, máximo 80 chars cada una"],
   "recommendedActions": [
     {
-      "action": "string (acción concreta, ej: 'Llamar para ofrecer 1 mes gratis')",
+      "action": "string (acción concreta)",
       "priority": "alta" | "media" | "baja",
-      "expectedImpact": "string (impacto esperado, ej: 'Reduce riesgo 40%')"
+      "expectedImpact": "string (impacto esperado)"
     }
   ],
   "personalizedMessage": "string (mensaje WhatsApp personalizado de retención, max 250 chars)",
   "estimatedLifetimeValue": "string (valor proyectado si se retiene, ej: '$8,500 MXN/año')",
   "urgencyDays": number (días en los que actuar, 1-30)
-}
-
-Considera estos factores:
-- Días desde última asistencia
-- Frecuencia de asistencia vs promedio histórico
-- Pagos pendientes
-- Membresía próxima a vencer
-- Tiempo como socio
-- Patrón de canjes de recompensas
-- Edad y antigüedad
-
-Sé directo y específico. Las acciones deben ser ejecutables hoy mismo.`;
+}`;
 
 async function handleAIChurnAnalysis(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
   if (!isAIEnabled()) {
-    return res.status(503).json({
-      error: 'IA no configurada',
-      hint: 'Configura OPENAI_API_KEY en las variables de entorno de Vercel',
-    });
+    return res.status(503).json({ error: 'IA no configurada', hint: 'Configura OPENAI_API_KEY en las variables de entorno de Vercel' });
   }
 
   const { memberId } = req.body || {};
   if (!memberId) return res.status(400).json({ error: 'memberId requerido' });
 
-  const db = getPrisma();
+  if (IS_DEMO_MODE || user.isDemo) {
+    const member = DEMO_MEMBERS.find((m) => m.id === memberId) || DEMO_MEMBERS[0];
+    return res.status(200).json({
+      success: true,
+      member: { id: member.id, name: `${member.firstName} ${member.lastName}`, currentRiskLevel: member.riskLevel },
+      analysis: { riskScore: 65, riskLevel: 'MEDIUM', topReasons: ['No ha asistido en 10 días', 'Membresía vence pronto'], recommendedActions: [{ action: 'Enviar mensaje de reactivación', priority: 'alta', expectedImpact: 'Reduce riesgo 40%' }], personalizedMessage: `Hola ${member.firstName}, te extrañamos en el gym. ¡Vuelve esta semana y te damos una clase gratis!`, estimatedLifetimeValue: '$8,500 MXN/año', urgencyDays: 7 },
+    });
+  }
+
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
-  const member = await db.member.findFirst({
-    where: { id: memberId, tenantId },
-    include: {
-      memberships: {
-        orderBy: { startDate: 'desc' },
-        take: 5,
-        include: { plan: true },
-      },
-      attendances: {
-        orderBy: { timestamp: 'desc' },
-        take: 30,
-        select: { timestamp: true, method: true },
-      },
-      pointMovements: { orderBy: { createdAt: 'desc' }, take: 10 },
-      redemptions: {
-        orderBy: { redeemedAt: 'desc' },
-        take: 5,
-        include: { reward: { select: { name: true, pointsCost: true } } },
-      },
-    },
-  });
+  const { data: member, error: memberError } = await supabase
+    .from('Member')
+    .select('*, Membership(*, Plan(*)), Attendance(timestamp, method), PointMovement(*), Redemption(*, Reward(name, pointsCost))')
+    .eq('id', memberId)
+    .eq('tenantId', tenantId)
+    .maybeSingle();
 
-  if (!member) return res.status(404).json({ error: 'Socio no encontrado' });
+  if (memberError || !member) return res.status(404).json({ error: 'Socio no encontrado' });
 
   const now = new Date();
-  const lastAttendance = member.attendances[0]?.timestamp;
+  const attendances = member.Attendance || [];
+  const lastAttendance = attendances[0]?.timestamp;
   const daysSinceLastAttendance = lastAttendance
     ? Math.floor((now.getTime() - new Date(lastAttendance).getTime()) / 86400000)
     : null;
-
-  const last30Days = member.attendances.filter(
-    (a) => new Date(a.timestamp).getTime() > now.getTime() - 30 * 86400000
-  ).length;
-
-  const activeMembership = member.memberships.find((m) => m.status === 'ACTIVE');
+  const last30Days = attendances.filter((a) => new Date(a.timestamp).getTime() > now.getTime() - 30 * 86400000).length;
+  const activeMembership = (member.Membership || []).find((m) => m.status === 'ACTIVE');
   const daysToExpiry = activeMembership
     ? Math.floor((new Date(activeMembership.endDate).getTime() - now.getTime()) / 86400000)
     : null;
-
-  const ageYears = member.dateOfBirth
-    ? Math.floor(
-        (now.getTime() - new Date(member.dateOfBirth).getTime()) / (365.25 * 86400000)
-      )
-    : null;
-
-  const memberAgeDays = Math.floor(
-    (now.getTime() - new Date(member.createdAt).getTime()) / 86400000
-  );
+  const memberAgeDays = Math.floor((now.getTime() - new Date(member.createdAt).getTime()) / 86400000);
 
   const profile = {
     nombre: `${member.firstName} ${member.lastName}`,
-    edad: ageYears,
     diasComoSocio: memberAgeDays,
     diasSinAsistir: daysSinceLastAttendance,
     asistenciasUltimos30Dias: last30Days,
-    totalAsistenciasHistoricas: member.attendances.length,
-    membresiaActiva: activeMembership
-      ? {
-          plan: activeMembership.plan.name,
-          precio: activeMembership.plan.price,
-          duracionDias: activeMembership.plan.durationDays,
-          diasRestantes: daysToExpiry,
-        }
-      : null,
-    historialMembresias: member.memberships.length,
+    membresiaActiva: activeMembership ? { plan: activeMembership.Plan?.name, diasRestantes: daysToExpiry } : null,
     saldoPuntos: member.pointsBalance,
-    canjesRealizados: member.redemptions.length,
-    ultimosCanjes: member.redemptions.map((r) => r.reward.name),
-    esReferido: member.isReferred,
+    canjesRealizados: (member.Redemption || []).length,
     consentimientoMarketing: member.marketingConsent,
-    optOut: member.optOut,
   };
 
   const userPrompt = `Analiza este perfil de socio y predice su riesgo de abandono:\n\n${JSON.stringify(profile, null, 2)}\n\nGenera el análisis en formato JSON según el schema indicado.`;
+  const analysis = await callAI(AI_CHURN_SYSTEM_PROMPT, userPrompt, { temperature: 0.4, maxTokens: 1500, jsonMode: true });
 
-  const analysis = await callAI(AI_CHURN_SYSTEM_PROMPT, userPrompt, {
-    temperature: 0.4,
-    maxTokens: 1500,
-    jsonMode: true,
-  });
-
+  // Persist risk score back to DB
   if (analysis.riskScore !== undefined && analysis.riskLevel) {
     const validLevel = ['LOW', 'MEDIUM', 'HIGH'].includes(analysis.riskLevel)
       ? analysis.riskLevel
-      : analysis.riskLevel === 'CRITICAL'
-      ? 'HIGH'
-      : 'LOW';
-
-    await db.member.update({
-      where: { id: memberId },
-      data: {
-        riskScore: Math.min(100, Math.max(0, analysis.riskScore)),
-        riskLevel: validLevel,
-        riskScoreDate: new Date(),
-      },
-    });
+      : analysis.riskLevel === 'CRITICAL' ? 'HIGH' : 'LOW';
+    await supabase.from('Member').update({
+      riskScore: Math.min(100, Math.max(0, analysis.riskScore)),
+      riskLevel: validLevel,
+      riskScoreDate: new Date().toISOString(),
+    }).eq('id', memberId);
   }
 
   return res.status(200).json({
     success: true,
-    member: {
-      id: member.id,
-      name: profile.nombre,
-      currentRiskScore: member.riskScore,
-      currentRiskLevel: member.riskLevel,
-    },
+    member: { id: member.id, name: `${member.firstName} ${member.lastName}`, currentRiskScore: member.riskScore, currentRiskLevel: member.riskLevel },
     analysis,
     profile,
   });
 }
 
+// --- POST /api/ai/reward-recommendations ---
 const AI_REWARD_SYSTEM_PROMPT = `Eres un experto en programas de fidelización de gimnasios. Tu tarea es recomendar recompensas personalizadas para cada socio basándote en su comportamiento y perfil.
 
 Responde con un objeto JSON con esta estructura:
-
 {
   "recommendations": [
     {
       "rewardName": "string (nombre de la recompensa, max 80 chars)",
       "pointsCost": number (entre 50 y 1000),
       "category": "experiencia" | "descuento" | "producto" | "exclusivo",
-      "matchScore": number (0-100, qué tan bien encaja con el socio),
+      "matchScore": number (0-100),
       "reasoning": "string (por qué esta recompensa, max 150 chars)",
-      "expectedEngagement": "string (impacto esperado, ej: 'Aumenta visitas 20%')"
+      "expectedEngagement": "string (impacto esperado)"
     }
   ],
   "memberInsights": {
     "profile": "string (resumen del socio, max 200 chars)",
-    "preferredActivities": [array de strings],
+    "preferredActivities": ["array de strings"],
     "engagementLevel": "alto" | "medio" | "bajo",
     "loyaltyStage": "nuevo" | "establecido" | "leal" | "embajador"
   },
   "personalizedOffer": {
     "title": "string (oferta especial, max 60 chars)",
     "message": "string (mensaje WhatsApp con la oferta, max 250 chars, usar {{firstName}})",
-    "validityDays": number (días de vigencia, 7-30)
+    "validityDays": number (7-30)
   }
-}
-
-IMPORTANTE:
-- Genera 4-6 recomendaciones diversas en categoría
-- Las recompensas deben tener costo proporcional al saldo del socio
-- Personalizar según género (si es inferible del nombre), edad, patrón de visitas
-- El mensaje de oferta debe ser cálido y específico
-- Considera la etapa de fidelización del socio`;
+}`;
 
 async function handleAIRewardRecommendations(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Método no permitido' });
-  const user = requireRole(req, res, ['OWNER', 'ADMIN']);
+  const user = await requireRole(req, res, ['OWNER', 'ADMIN']);
   if (!user) return;
 
   if (!isAIEnabled()) {
-    return res.status(503).json({
-      error: 'IA no configurada',
-      hint: 'Configura OPENAI_API_KEY en las variables de entorno de Vercel',
-    });
+    return res.status(503).json({ error: 'IA no configurada', hint: 'Configura OPENAI_API_KEY en las variables de entorno de Vercel' });
   }
 
   const { memberId } = req.body || {};
   if (!memberId) return res.status(400).json({ error: 'memberId requerido' });
 
-  const db = getPrisma();
+  if (IS_DEMO_MODE || user.isDemo) {
+    const member = DEMO_MEMBERS.find((m) => m.id === memberId) || DEMO_MEMBERS[0];
+    return res.status(200).json({
+      success: true,
+      member: { id: member.id, name: `${member.firstName} ${member.lastName}`, pointsBalance: member.pointsBalance },
+      recommendations: [{ rewardName: 'Clase de yoga gratis', pointsCost: 150, category: 'experiencia', matchScore: 92, reasoning: 'Asiste frecuentemente en horario matutino', expectedEngagement: 'Aumenta visitas 20%' }],
+      memberInsights: { profile: 'Socio activo con buen historial de asistencia', preferredActivities: ['cardio', 'pesas'], engagementLevel: 'alto', loyaltyStage: 'establecido' },
+      personalizedOffer: { title: 'Oferta especial para ti', message: `Hola ${member.firstName}, tienes ${member.pointsBalance} puntos. ¡Canjéalos por una clase gratis esta semana!`, validityDays: 7 },
+    });
+  }
+
+  const supabase = getSupabase();
   const tenantId = user.tenantId;
 
-  const member = await db.member.findFirst({
-    where: { id: memberId, tenantId },
-    include: {
-      memberships: {
-        where: { status: 'ACTIVE' },
-        include: { plan: true },
-        take: 1,
-      },
-      attendances: { orderBy: { timestamp: 'desc' }, take: 30 },
-      redemptions: {
-        orderBy: { redeemedAt: 'desc' },
-        take: 5,
-        include: { reward: true },
-      },
-      pointMovements: { orderBy: { createdAt: 'desc' }, take: 10 },
-    },
-  });
+  const [{ data: member }, { data: availableRewards }] = await Promise.all([
+    supabase.from('Member').select('*, Membership(status, Plan(name)), Attendance(timestamp), Redemption(*, Reward(name, pointsCost)), PointMovement(*)').eq('id', memberId).eq('tenantId', tenantId).maybeSingle(),
+    supabase.from('Reward').select('*').eq('tenantId', tenantId).eq('isActive', true).order('pointsCost', { ascending: true }),
+  ]);
 
   if (!member) return res.status(404).json({ error: 'Socio no encontrado' });
 
-  const availableRewards = await db.reward.findMany({
-    where: { tenantId, isActive: true },
-    orderBy: { pointsCost: 'asc' },
-  });
-
   const now = new Date();
-  const ageYears = member.dateOfBirth
-    ? Math.floor(
-        (now.getTime() - new Date(member.dateOfBirth).getTime()) / (365.25 * 86400000)
-      )
-    : null;
-
-  const attendanceHours = member.attendances.map((a) => new Date(a.timestamp).getHours());
-  const avgHour =
-    attendanceHours.length > 0
-      ? Math.round(attendanceHours.reduce((a, b) => a + b, 0) / attendanceHours.length)
-      : null;
-
-  const attendanceDays = member.attendances.map((a) => {
-    const day = new Date(a.timestamp).getDay();
-    return ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'][day];
-  });
+  const attendances = member.Attendance || [];
+  const attendanceHours = attendances.map((a) => new Date(a.timestamp).getHours());
+  const avgHour = attendanceHours.length > 0 ? Math.round(attendanceHours.reduce((a, b) => a + b, 0) / attendanceHours.length) : null;
 
   const profile = {
     nombre: member.firstName,
-    edad: ageYears,
     saldoPuntos: member.pointsBalance,
-    asistenciasRecientes: member.attendances.length,
+    asistenciasRecientes: attendances.length,
     horarioPreferido: avgHour ? `~${avgHour}:00 hrs` : 'desconocido',
-    diasMasFrecuentes: [...new Set(attendanceDays)].slice(0, 3),
-    planActual: member.memberships[0]?.plan.name,
-    diasComoSocio: Math.floor(
-      (now.getTime() - new Date(member.createdAt).getTime()) / 86400000
-    ),
-    canjesAnteriores: member.redemptions.map((r) => ({
-      recompensa: r.reward.name,
-      costoPuntos: r.pointsSpent,
-    })),
+    planActual: (member.Membership || []).find((m) => m.status === 'ACTIVE')?.Plan?.name,
+    diasComoSocio: Math.floor((now.getTime() - new Date(member.createdAt).getTime()) / 86400000),
+    canjesAnteriores: (member.Redemption || []).map((r) => ({ recompensa: r.Reward?.name, costoPuntos: r.pointsSpent })),
   };
 
-  const userPrompt = `Genera recomendaciones de recompensas para este socio:\n\n${JSON.stringify(profile, null, 2)}\n\nRecompensas disponibles actualmente en el gimnasio:\n${availableRewards.map((r) => `- ${r.name} (${r.pointsCost} pts, stock: ${r.stock ?? 'ilimitado'})`).join('\n') || 'ninguna'}\n\nGenera la respuesta en formato JSON según el schema indicado. Las recomendaciones pueden ser nuevas (no necesariamente de las disponibles).`;
+  const userPrompt = `Genera recomendaciones de recompensas para este socio:\n\n${JSON.stringify(profile, null, 2)}\n\nRecompensas disponibles:\n${(availableRewards || []).map((r) => `- ${r.name} (${r.pointsCost} pts, stock: ${r.stock ?? 'ilimitado'})`).join('\n') || 'ninguna'}\n\nGenera la respuesta en formato JSON según el schema indicado.`;
 
-  const recommendations = await callAI(AI_REWARD_SYSTEM_PROMPT, userPrompt, {
-    temperature: 0.8,
-    maxTokens: 2000,
-    jsonMode: true,
-  });
+  const recommendations = await callAI(AI_REWARD_SYSTEM_PROMPT, userPrompt, { temperature: 0.8, maxTokens: 2000, jsonMode: true });
 
   return res.status(200).json({
     success: true,
-    member: {
-      id: member.id,
-      name: `${member.firstName} ${member.lastName}`,
-      pointsBalance: member.pointsBalance,
-    },
+    member: { id: member.id, name: `${member.firstName} ${member.lastName}`, pointsBalance: member.pointsBalance },
     ...recommendations,
   });
 }
@@ -1492,20 +1371,16 @@ export default async function handler(req, res) {
     if (path === '/plans' || path.startsWith('/plans/')) return await handlePlans(req, res);
 
     // Attendances
-    if (path === '/attendances' || path.startsWith('/attendances/'))
-      return await handleAttendances(req, res);
+    if (path === '/attendances' || path.startsWith('/attendances/')) return await handleAttendances(req, res);
 
     // Campaigns
-    if (path === '/campaigns' || path.startsWith('/campaigns/'))
-      return await handleCampaigns(req, res);
+    if (path === '/campaigns' || path.startsWith('/campaigns/')) return await handleCampaigns(req, res);
 
     // Segments
-    if (path === '/segments' || path.startsWith('/segments/'))
-      return await handleSegments(req, res);
+    if (path === '/segments' || path.startsWith('/segments/')) return await handleSegments(req, res);
 
     // Payments
-    if (path === '/payments' || path.startsWith('/payments/'))
-      return await handlePayments(req, res);
+    if (path === '/payments' || path.startsWith('/payments/')) return await handlePayments(req, res);
 
     // Rewards
     if (path === '/rewards' || path.startsWith('/rewards/')) return await handleRewards(req, res);
@@ -1517,8 +1392,7 @@ export default async function handler(req, res) {
     if (path === '/ai/insights') return await handleAIInsights(req, res);
     if (path === '/ai/campaign-assistant') return await handleAICampaignAssistant(req, res);
     if (path === '/ai/churn-analysis') return await handleAIChurnAnalysis(req, res);
-    if (path === '/ai/reward-recommendations')
-      return await handleAIRewardRecommendations(req, res);
+    if (path === '/ai/reward-recommendations') return await handleAIRewardRecommendations(req, res);
 
     // 404 fallback
     return res.status(404).json({ error: 'Ruta no encontrada', path });
