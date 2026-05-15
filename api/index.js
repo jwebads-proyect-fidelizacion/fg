@@ -12,9 +12,9 @@ const SUPABASE_URL = process.env.SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || '';
 
 // AI config
-const AI_PROVIDER = process.env.AI_PROVIDER || 'openai';
-const AI_API_KEY = process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || '';
-const AI_MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
+const AI_API_KEY = process.env.GROQ_API_KEY || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+const AI_MODEL = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
+const AI_PROVIDER = AI_API_KEY.startsWith('gsk_') ? 'groq' : (process.env.AI_PROVIDER || 'openai');
 
 // Demo mode: when SUPABASE_URL is not configured
 const IS_DEMO_MODE = !SUPABASE_URL;
@@ -125,16 +125,20 @@ function isAIEnabled() {
 
 async function callAI(systemPrompt, userPrompt, options = {}) {
   if (!AI_API_KEY) {
-    throw new Error('AI no configurada. Configura OPENAI_API_KEY o ANTHROPIC_API_KEY en Vercel.');
+    throw new Error('AI no configurada. Configura GROQ_API_KEY en Vercel.');
   }
   const { temperature = 0.7, maxTokens = 1500, jsonMode = true } = options;
   if (AI_PROVIDER === 'anthropic') {
     return callAnthropic(systemPrompt, userPrompt, { temperature, maxTokens, jsonMode });
   }
-  return callOpenAI(systemPrompt, userPrompt, { temperature, maxTokens, jsonMode });
+  // Groq uses OpenAI-compatible API
+  const baseUrl = AI_PROVIDER === 'groq'
+    ? 'https://api.groq.com/openai/v1/chat/completions'
+    : 'https://api.openai.com/v1/chat/completions';
+  return callOpenAICompatible(baseUrl, systemPrompt, userPrompt, { temperature, maxTokens, jsonMode });
 }
 
-async function callOpenAI(systemPrompt, userPrompt, opts) {
+async function callOpenAICompatible(baseUrl, systemPrompt, userPrompt, opts) {
   const body = {
     model: AI_MODEL,
     messages: [
@@ -146,14 +150,14 @@ async function callOpenAI(systemPrompt, userPrompt, opts) {
   };
   if (opts.jsonMode) body.response_format = { type: 'json_object' };
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(baseUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${AI_API_KEY}` },
     body: JSON.stringify(body),
   });
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`OpenAI error ${response.status}: ${errorText}`);
+    throw new Error(`AI error ${response.status}: ${errorText}`);
   }
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content || '';
@@ -251,7 +255,7 @@ const DEMO_DASHBOARD = {
 // ---------------------------------------------------------------------------
 async function handleHealth(req, res) {
   const envInfo = {};
-  const relevantKeys = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'NODE_ENV', 'VERCEL', 'VERCEL_ENV', 'VERCEL_REGION', 'AI_PROVIDER'];
+  const relevantKeys = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'NODE_ENV', 'VERCEL', 'VERCEL_ENV', 'VERCEL_REGION', 'AI_PROVIDER', 'GROQ_API_KEY'];
   for (const key of relevantKeys) {
     const value = process.env[key];
     if (!value) {
