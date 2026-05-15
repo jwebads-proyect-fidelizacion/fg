@@ -13,6 +13,14 @@ import {
   Sparkles,
   CheckCircle2,
   Lightbulb,
+  ArrowRight,
+  ArrowLeft,
+  Wand2,
+  Users,
+  Gift,
+  Heart,
+  Zap,
+  Edit3,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -43,6 +51,15 @@ interface AISuggestion {
   subject?: string;
 }
 
+interface CampaignProposal {
+  name: string;
+  message: string;
+  segment: string;
+  timing: string;
+  type: string;
+  channel: string;
+}
+
 const statusLabels: Record<string, string> = {
   DRAFT: 'Borrador',
   SCHEDULED: 'Programada',
@@ -54,11 +71,11 @@ const statusLabels: Record<string, string> = {
 
 const statusColors: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-700',
-  SCHEDULED: 'bg-blue-50 text-blue-700',
-  RUNNING: 'bg-green-50 text-green-700',
-  PAUSED: 'bg-yellow-50 text-yellow-700',
-  COMPLETED: 'bg-indigo-50 text-indigo-700',
-  CANCELLED: 'bg-red-50 text-red-700',
+  SCHEDULED: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200',
+  RUNNING: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+  PAUSED: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  COMPLETED: 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200',
+  CANCELLED: 'bg-red-50 text-red-700 ring-1 ring-red-200',
 };
 
 const typeLabels: Record<string, string> = {
@@ -70,8 +87,48 @@ const typeLabels: Record<string, string> = {
   CUSTOM: 'Personalizada',
 };
 
+const PRESET_TEMPLATES = [
+  {
+    id: 'reactivation',
+    icon: Users,
+    title: 'Recuperar Inactivos',
+    description: 'Mensaje motivacional para socios que no asisten hace 2+ semanas',
+    color: 'from-orange-500 to-red-500',
+    bgLight: 'bg-orange-50',
+    prompt: 'Quiero recuperar socios inactivos que no vienen hace más de 2 semanas con un mensaje motivacional y un incentivo para volver',
+  },
+  {
+    id: 'birthday',
+    icon: Gift,
+    title: 'Felicitar Cumpleaños',
+    description: 'Saludo personalizado con descuento especial de cumpleaños',
+    color: 'from-pink-500 to-purple-500',
+    bgLight: 'bg-pink-50',
+    prompt: 'Quiero felicitar a los socios en su cumpleaños con un mensaje cálido y ofrecerles un beneficio especial como regalo',
+  },
+  {
+    id: 'seasonal',
+    icon: Zap,
+    title: 'Promoción de Temporada',
+    description: 'Oferta especial por tiempo limitado para nuevas inscripciones',
+    color: 'from-indigo-500 to-blue-500',
+    bgLight: 'bg-indigo-50',
+    prompt: 'Quiero crear una promoción de temporada con descuento especial por tiempo limitado para atraer nuevos socios y motivar renovaciones',
+  },
+  {
+    id: 'referral',
+    icon: Heart,
+    title: 'Programa de Referidos',
+    description: 'Incentiva a socios actuales a traer amigos con recompensas',
+    color: 'from-emerald-500 to-teal-500',
+    bgLight: 'bg-emerald-50',
+    prompt: 'Quiero incentivar a mis socios actuales a referir amigos ofreciendo recompensas tanto al que refiere como al nuevo socio',
+  },
+];
+
+
 export default function Campaigns() {
-  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [selectedStats, setSelectedStats] = useState<Campaign | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
   const queryClient = useQueryClient();
@@ -104,85 +161,103 @@ export default function Campaigns() {
 
   if (error) {
     return (
-      <div className="rounded-lg bg-red-50 border border-red-200 p-6 text-center">
-        <p className="text-red-700">Error al cargar las campañas</p>
+      <div className="rounded-2xl bg-red-50 border border-red-200 p-8 text-center">
+        <p className="text-red-700 font-medium">Error al cargar las campañas</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Campañas</h1>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">Campañas</h1>
+          <p className="text-sm text-gray-500 mt-1">Crea y gestiona campañas de marketing con IA</p>
+        </div>
         <button
-          onClick={() => setShowCreateForm(true)}
-          className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors"
+          onClick={() => setShowCreateFlow(true)}
+          className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-5 py-2.5 text-sm font-semibold text-white hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg hover:scale-105"
         >
-          <Plus className="h-4 w-4" />
-          Nueva Campaña
+          <Sparkles className="h-4 w-4" />
+          Nueva Campaña con IA
         </button>
       </div>
 
       {/* Success Toast */}
       {successMessage && (
-        <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 p-4">
-          <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
-          <p className="text-sm font-medium text-green-700">{successMessage}</p>
+        <div className="flex items-center gap-3 rounded-2xl bg-emerald-50 border border-emerald-200 p-4 shadow-sm">
+          <CheckCircle2 className="h-5 w-5 text-emerald-600 flex-shrink-0" />
+          <p className="text-sm font-medium text-emerald-700">{successMessage}</p>
+          <button onClick={() => setSuccessMessage('')} className="ml-auto text-emerald-400 hover:text-emerald-600">
+            <X className="h-4 w-4" />
+          </button>
         </div>
       )}
 
-      {campaigns && campaigns.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 text-gray-500">
-          <Megaphone className="h-12 w-12 mb-3 text-gray-300" />
-          <p className="font-medium">No hay campañas creadas</p>
-          <p className="text-sm">Cree su primera campaña de marketing</p>
+      {/* AI Campaign Creation - Primary CTA when no campaigns */}
+      {(!campaigns || campaigns.length === 0) && !showCreateFlow && (
+        <div className="rounded-2xl bg-gradient-to-br from-indigo-50 via-purple-50 to-pink-50 border border-indigo-200 p-10 text-center">
+          <div className="rounded-full bg-indigo-100 h-16 w-16 flex items-center justify-center mx-auto mb-4">
+            <Bot className="h-8 w-8 text-indigo-600" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">Crea tu primera campaña con IA</h2>
+          <p className="text-gray-600 mb-6 max-w-md mx-auto">
+            Describe lo que quieres lograr y nuestra IA generará propuestas completas de campaña para ti.
+          </p>
+          <button
+            onClick={() => setShowCreateFlow(true)}
+            className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-6 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg"
+          >
+            <Wand2 className="h-4 w-4" />
+            Crear Campaña
+          </button>
         </div>
-      ) : (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      )}
+
+      {/* Campaigns Table */}
+      {campaigns && campaigns.length > 0 && (
+        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-gray-50 border-b border-gray-200">
+              <thead className="bg-gray-50/80 border-b border-gray-200">
                 <tr>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Nombre</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Tipo</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Estado</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden md:table-cell">Canal</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden lg:table-cell">Fecha</th>
-                  <th className="text-right px-4 py-3 font-medium text-gray-600">Acciones</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider">Nombre</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider">Tipo</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider">Estado</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider hidden md:table-cell">Canal</th>
+                  <th className="text-left px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider hidden lg:table-cell">Fecha</th>
+                  <th className="text-right px-5 py-3.5 font-semibold text-gray-600 text-xs uppercase tracking-wider">Acciones</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {campaigns?.map((campaign) => (
-                  <tr key={campaign.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-medium text-gray-900">{campaign.name}</td>
-                    <td className="px-4 py-3 text-gray-600">
+              <tbody className="divide-y divide-gray-50">
+                {campaigns.map((campaign, idx) => (
+                  <tr key={campaign.id} className={`hover:bg-indigo-50/30 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50/30'}`}>
+                    <td className="px-5 py-3.5 font-medium text-gray-900">{campaign.name}</td>
+                    <td className="px-5 py-3.5 text-gray-600">
                       {typeLabels[campaign.type] || campaign.type}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          statusColors[campaign.status] || 'bg-gray-100 text-gray-700'
-                        }`}
-                      >
+                    <td className="px-5 py-3.5">
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${statusColors[campaign.status] || 'bg-gray-100 text-gray-700'}`}>
                         {statusLabels[campaign.status] || campaign.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 hidden md:table-cell">
-                      {campaign.channel === 'WHATSAPP' ? 'WhatsApp' : campaign.channel === 'EMAIL' ? 'Email' : campaign.channel}
+                    <td className="px-5 py-3.5 text-gray-600 hidden md:table-cell">
+                      {campaign.channel === 'WHATSAPP' ? '📱 WhatsApp' : campaign.channel === 'EMAIL' ? '📧 Email' : campaign.channel}
                     </td>
-                    <td className="px-4 py-3 text-gray-600 hidden lg:table-cell">
+                    <td className="px-5 py-3.5 text-gray-500 hidden lg:table-cell">
                       {campaign.scheduledAt
                         ? new Date(campaign.scheduledAt).toLocaleDateString('es-MX')
                         : campaign.startedAt
                         ? new Date(campaign.startedAt).toLocaleDateString('es-MX')
                         : '—'}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-5 py-3.5">
                       <div className="flex items-center justify-end gap-1">
                         {campaign.status === 'RUNNING' && (
                           <button
                             onClick={() => statusMutation.mutate({ id: campaign.id, action: 'pause' })}
-                            className="rounded p-1.5 text-yellow-600 hover:bg-yellow-50"
+                            className="rounded-lg p-2 text-amber-600 hover:bg-amber-50 transition-colors"
                             title="Pausar"
                           >
                             <Pause className="h-4 w-4" />
@@ -191,7 +266,7 @@ export default function Campaigns() {
                         {campaign.status === 'PAUSED' && (
                           <button
                             onClick={() => statusMutation.mutate({ id: campaign.id, action: 'resume' })}
-                            className="rounded p-1.5 text-green-600 hover:bg-green-50"
+                            className="rounded-lg p-2 text-emerald-600 hover:bg-emerald-50 transition-colors"
                             title="Reanudar"
                           >
                             <Play className="h-4 w-4" />
@@ -204,7 +279,7 @@ export default function Campaigns() {
                                 statusMutation.mutate({ id: campaign.id, action: 'cancel' });
                               }
                             }}
-                            className="rounded p-1.5 text-red-600 hover:bg-red-50"
+                            className="rounded-lg p-2 text-red-600 hover:bg-red-50 transition-colors"
                             title="Cancelar"
                           >
                             <XCircle className="h-4 w-4" />
@@ -212,7 +287,7 @@ export default function Campaigns() {
                         )}
                         <button
                           onClick={() => setSelectedStats(campaign)}
-                          className="rounded p-1.5 text-indigo-600 hover:bg-indigo-50"
+                          className="rounded-lg p-2 text-indigo-600 hover:bg-indigo-50 transition-colors"
                           title="Estadísticas"
                         >
                           <BarChart3 className="h-4 w-4" />
@@ -227,13 +302,13 @@ export default function Campaigns() {
         </div>
       )}
 
-      {/* Create Campaign Modal */}
-      {showCreateForm && (
-        <CreateCampaignModal
-          onClose={() => setShowCreateForm(false)}
+      {/* Create Campaign Flow */}
+      {showCreateFlow && (
+        <CreateCampaignFlow
+          onClose={() => setShowCreateFlow(false)}
           onSuccess={() => {
-            setSuccessMessage('Campaña creada exitosamente');
-            setTimeout(() => setSuccessMessage(''), 3000);
+            setSuccessMessage('¡Campaña creada exitosamente!');
+            setTimeout(() => setSuccessMessage(''), 5000);
           }}
         />
       )}
@@ -246,39 +321,64 @@ export default function Campaigns() {
   );
 }
 
-function CreateCampaignModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
-  const queryClient = useQueryClient();
-  const [form, setForm] = useState({
-    name: '',
-    objective: '',
-    type: 'PROMOTION',
-    channel: 'WHATSAPP',
-    message: '',
-    frequency: 'ONE_TIME',
-    scheduledAt: '',
-  });
-  const [aiDescription, setAiDescription] = useState('');
-  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion | null>(null);
-  const [showAiPanel, setShowAiPanel] = useState(false);
 
-  // AI assistant mutation
+function CreateCampaignFlow({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const queryClient = useQueryClient();
+  const [step, setStep] = useState(1);
+  const [description, setDescription] = useState('');
+  const [proposals, setProposals] = useState<CampaignProposal[]>([]);
+  const [selectedProposal, setSelectedProposal] = useState<CampaignProposal | null>(null);
+  const [editedProposal, setEditedProposal] = useState<CampaignProposal | null>(null);
+  const [scheduledAt, setScheduledAt] = useState('');
+
+  // AI generation mutation
   const aiMutation = useMutation({
-    mutationFn: async (description: string) => {
+    mutationFn: async (prompt: string) => {
       const response = await api.post('/ai/campaign-assistant', {
-        description,
-        type: form.type,
-        channel: form.channel,
+        description: prompt,
+        type: 'CUSTOM',
+        channel: 'WHATSAPP',
       });
       return response.data;
     },
-    onSuccess: (data) => {
-      setAiSuggestions(data.suggestions || data);
+    onSuccess: (data: any) => {
+      // Generate 3 proposals from AI response
+      const suggestions = data.suggestions || data;
+      const variants = suggestions?.messageVariants || [];
+      const generatedProposals: CampaignProposal[] = [
+        {
+          name: `Campaña - ${description.slice(0, 30)}...`,
+          message: variants[0] || 'Hola {{nombre}}, te extrañamos en el gym. ¡Vuelve y obtén un 20% de descuento!',
+          segment: 'Socios inactivos (2+ semanas)',
+          timing: suggestions?.bestTime || 'Lunes a las 9:00 AM',
+          type: 'REACTIVATION',
+          channel: 'WHATSAPP',
+        },
+        {
+          name: `Reactivación - ${description.slice(0, 25)}`,
+          message: variants[1] || 'Hey {{nombre}}, ¿sabías que tu cuerpo pierde progreso después de 2 semanas? ¡Regresa hoy!',
+          segment: 'Socios con baja asistencia',
+          timing: suggestions?.bestTime || 'Miércoles a las 7:00 PM',
+          type: 'PROMOTION',
+          channel: 'WHATSAPP',
+        },
+        {
+          name: `Motivación - ${description.slice(0, 25)}`,
+          message: variants[2] || '{{nombre}}, cada día cuenta. Tu plan te espera con beneficios exclusivos. ¡Nos vemos!',
+          segment: 'Todos los socios activos',
+          timing: 'Viernes a las 6:00 PM',
+          type: 'CUSTOM',
+          channel: 'WHATSAPP',
+        },
+      ];
+      setProposals(generatedProposals);
+      setStep(2);
     },
   });
 
   // Create campaign mutation
   const createMutation = useMutation({
-    mutationFn: async (data: Record<string, string | null>) => {
+    mutationFn: async (data: Record<string, any>) => {
       const response = await api.post('/campaigns', data);
       return response.data;
     },
@@ -289,265 +389,376 @@ function CreateCampaignModal({ onClose, onSuccess }: { onClose: () => void; onSu
     },
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    createMutation.mutate({
-      name: form.name,
-      type: form.type,
-      channel: form.channel,
-      message: form.message,
-      scheduledAt: form.scheduledAt || null,
-    });
+  const handleTemplateSelect = (template: typeof PRESET_TEMPLATES[0]) => {
+    setDescription(template.prompt);
+    aiMutation.mutate(template.prompt);
   };
 
-  const handleAiGenerate = () => {
-    if (aiDescription.trim()) {
-      aiMutation.mutate(aiDescription.trim());
+  const handleGenerateFromDescription = () => {
+    if (description.trim()) {
+      aiMutation.mutate(description.trim());
     }
   };
 
-  const handleAcceptSuggestion = (message: string) => {
-    setForm({ ...form, message });
-    setShowAiPanel(false);
+  const handleSelectProposal = (proposal: CampaignProposal) => {
+    setSelectedProposal(proposal);
+    setEditedProposal({ ...proposal });
+    setStep(3);
+  };
+
+  const handleCreateCampaign = () => {
+    if (!editedProposal) return;
+    createMutation.mutate({
+      name: editedProposal.name,
+      type: editedProposal.type,
+      channel: editedProposal.channel,
+      message: editedProposal.message,
+      scheduledAt: scheduledAt || null,
+    });
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 overflow-y-auto py-4">
-      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 mx-4 my-auto">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Nueva Campaña</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm overflow-y-auto py-4">
+      <div className="w-full max-w-3xl bg-white rounded-2xl shadow-2xl mx-4 my-auto animate-in fade-in zoom-in-95">
+        {/* Header */}
+        <div className="flex items-center justify-between px-7 py-5 border-b border-gray-100">
+          <div className="flex items-center gap-3">
+            <div className="rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 p-2.5">
+              <Wand2 className="h-5 w-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Crear Campaña con IA</h2>
+              <p className="text-xs text-gray-500">Paso {step} de 4</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        {createMutation.error && (
-          <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-            {(createMutation.error as any)?.response?.data?.error || 'Error al crear la campaña'}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nombre *</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-              required
-              placeholder="Ej: Promoción Enero 2024"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Objetivo</label>
-            <input
-              type="text"
-              value={form.objective}
-              onChange={(e) => setForm({ ...form, objective: e.target.value })}
-              placeholder="Ej: Recuperar socios inactivos del último mes"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-            />
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
-              <select
-                value={form.type}
-                onChange={(e) => setForm({ ...form, type: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-              >
-                <option value="WELCOME">Bienvenida</option>
-                <option value="RENEWAL">Renovación</option>
-                <option value="REACTIVATION">Reactivación</option>
-                <option value="PROMOTION">Promoción</option>
-                <option value="BIRTHDAY">Cumpleaños</option>
-                <option value="CUSTOM">Personalizada</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Canal</label>
-              <select
-                value={form.channel}
-                onChange={(e) => setForm({ ...form, channel: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-              >
-                <option value="WHATSAPP">WhatsApp</option>
-                <option value="EMAIL">Email</option>
-                <option value="SMS">SMS</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Frecuencia</label>
-              <select
-                value={form.frequency}
-                onChange={(e) => setForm({ ...form, frequency: e.target.value })}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-              >
-                <option value="ONE_TIME">Una vez</option>
-                <option value="DAILY">Diaria</option>
-                <option value="WEEKLY">Semanal</option>
-                <option value="MONTHLY">Mensual</option>
-              </select>
-            </div>
-          </div>
-
-          {/* AI Assistant Section */}
-          <div className="border border-indigo-200 rounded-lg bg-indigo-50/50 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Bot className="h-4 w-4 text-indigo-600" />
-                <span className="text-sm font-medium text-indigo-900">Asistente IA</span>
+        {/* Step indicator */}
+        <div className="px-7 pt-5">
+          <div className="flex items-center gap-2">
+            {[1, 2, 3, 4].map((s) => (
+              <div key={s} className="flex items-center gap-2 flex-1">
+                <div className={`h-2 flex-1 rounded-full transition-colors ${s <= step ? 'bg-indigo-500' : 'bg-gray-200'}`} />
               </div>
-              <button
-                type="button"
-                onClick={() => setShowAiPanel(!showAiPanel)}
-                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
-              >
-                {showAiPanel ? 'Ocultar' : 'Mostrar'}
-              </button>
-            </div>
+            ))}
+          </div>
+          <div className="flex justify-between mt-1.5 text-xs text-gray-400">
+            <span>Describir</span>
+            <span>Propuestas</span>
+            <span>Editar</span>
+            <span>Crear</span>
+          </div>
+        </div>
 
-            {showAiPanel && (
-              <div className="space-y-3">
-                <div>
-                  <textarea
-                    value={aiDescription}
-                    onChange={(e) => setAiDescription(e.target.value)}
-                    placeholder="Describa su campaña: ej. 'Quiero recuperar socios que no vienen hace 2 semanas con un mensaje motivacional y un descuento del 20%'"
-                    rows={3}
-                    className="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none bg-white"
-                  />
+        <div className="p-7">
+          {/* Step 1: Describe or pick template */}
+          {step === 1 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-2">
+                  ¿Qué tipo de campaña quieres crear?
+                </h3>
+                <p className="text-sm text-gray-500">
+                  Elige una plantilla o describe tu idea en lenguaje natural.
+                </p>
+              </div>
+
+              {/* Preset Templates */}
+              <div className="grid grid-cols-2 gap-3">
+                {PRESET_TEMPLATES.map((template) => (
+                  <button
+                    key={template.id}
+                    onClick={() => handleTemplateSelect(template)}
+                    disabled={aiMutation.isPending}
+                    className={`text-left p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:shadow-md transition-all group ${template.bgLight}`}
+                  >
+                    <div className={`rounded-lg bg-gradient-to-br ${template.color} p-2 w-fit mb-3`}>
+                      <template.icon className="h-4 w-4 text-white" />
+                    </div>
+                    <p className="font-semibold text-gray-900 text-sm group-hover:text-indigo-700 transition-colors">
+                      {template.title}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">{template.description}</p>
+                  </button>
+                ))}
+              </div>
+
+              {/* Custom description */}
+              <div className="relative">
+                <div className="flex items-center gap-2 mb-2">
+                  <Bot className="h-4 w-4 text-indigo-500" />
+                  <span className="text-sm font-medium text-gray-700">O describe tu idea:</span>
                 </div>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Ej: Quiero recuperar socios que no vienen hace 2 semanas con un mensaje motivacional y un descuento del 20%..."
+                  rows={3}
+                  className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none"
+                />
+              </div>
+
+              {aiMutation.error && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                  Error al generar propuestas. Intente nuevamente.
+                </div>
+              )}
+
+              <div className="flex justify-end">
                 <button
-                  type="button"
-                  onClick={handleAiGenerate}
-                  disabled={!aiDescription.trim() || aiMutation.isPending}
-                  className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                  onClick={handleGenerateFromDescription}
+                  disabled={!description.trim() || aiMutation.isPending}
+                  className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-sm hover:shadow-md"
                 >
                   {aiMutation.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <Sparkles className="h-4 w-4" />
                   )}
-                  🤖 Generar ideas con IA
+                  Generar Propuestas con IA
                 </button>
-
-                {aiMutation.error && (
-                  <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-                    Error al generar sugerencias. Intente nuevamente.
-                  </div>
-                )}
-
-                {/* AI Suggestions */}
-                {aiSuggestions && (
-                  <div className="space-y-3 pt-3 border-t border-indigo-200">
-                    <p className="text-xs font-medium text-indigo-700 flex items-center gap-1">
-                      <Lightbulb className="h-3 w-3" />
-                      Sugerencias generadas:
-                    </p>
-
-                    {/* Best time */}
-                    {aiSuggestions.bestTime && (
-                      <div className="bg-white rounded-lg p-3 border border-indigo-100">
-                        <p className="text-xs text-gray-500 mb-1">⏰ Mejor horario sugerido</p>
-                        <p className="text-sm text-gray-900">{aiSuggestions.bestTime}</p>
-                      </div>
-                    )}
-
-                    {/* Message variants */}
-                    {aiSuggestions.messageVariants && aiSuggestions.messageVariants.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-xs text-gray-500">💬 Variantes de mensaje:</p>
-                        {aiSuggestions.messageVariants.map((variant, idx) => (
-                          <div
-                            key={idx}
-                            className="bg-white rounded-lg p-3 border border-indigo-100 flex items-start justify-between gap-3"
-                          >
-                            <p className="text-sm text-gray-800 flex-1">{variant}</p>
-                            <button
-                              type="button"
-                              onClick={() => handleAcceptSuggestion(variant)}
-                              className="flex-shrink-0 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200 font-medium"
-                            >
-                              Usar
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Tips */}
-                    {aiSuggestions.tips && aiSuggestions.tips.length > 0 && (
-                      <div className="bg-white rounded-lg p-3 border border-indigo-100">
-                        <p className="text-xs text-gray-500 mb-2">💡 Consejos:</p>
-                        <ul className="space-y-1">
-                          {aiSuggestions.tips.map((tip, idx) => (
-                            <li key={idx} className="text-sm text-gray-700 flex items-start gap-2">
-                              <span className="text-indigo-400 mt-0.5">•</span>
-                              {tip}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Plantilla WhatsApp / Mensaje *</label>
-            <textarea
-              value={form.message}
-              onChange={(e) => setForm({ ...form, message: e.target.value })}
-              required
-              rows={4}
-              placeholder="Escriba el mensaje de la campaña o use el asistente IA para generar uno..."
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none"
-            />
-            <p className="mt-1 text-xs text-gray-400">
-              Variables disponibles: {'{{nombre}}'}, {'{{apellido}}'}, {'{{plan}}'}
-            </p>
-          </div>
+          {/* Step 2: AI Proposals */}
+          {step === 2 && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-1">
+                  La IA generó 3 propuestas
+                </h3>
+                <p className="text-sm text-gray-500">Elige la que más te guste. Podrás editarla después.</p>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Fecha de inicio (opcional)
-            </label>
-            <input
-              type="datetime-local"
-              value={form.scheduledAt}
-              onChange={(e) => setForm({ ...form, scheduledAt: e.target.value })}
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
-            />
-          </div>
+              <div className="space-y-4">
+                {proposals.map((proposal, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => handleSelectProposal(proposal)}
+                    className="w-full text-left p-5 rounded-xl border border-gray-200 hover:border-indigo-300 hover:shadow-lg transition-all group"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <span className="text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">
+                          Propuesta {idx + 1}
+                        </span>
+                        <h4 className="font-semibold text-gray-900 mt-2 group-hover:text-indigo-700 transition-colors">
+                          {proposal.name}
+                        </h4>
+                      </div>
+                      <ArrowRight className="h-5 w-5 text-gray-300 group-hover:text-indigo-500 transition-colors" />
+                    </div>
+                    <p className="text-sm text-gray-700 bg-gray-50 rounded-lg p-3 mb-3 italic">
+                      "{proposal.message}"
+                    </p>
+                    <div className="flex items-center gap-4 text-xs text-gray-500">
+                      <span>👥 {proposal.segment}</span>
+                      <span>⏰ {proposal.timing}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={createMutation.isPending}
-              className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-            >
-              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
-              Crear Campaña
-            </button>
-          </div>
-        </form>
+              <div className="flex justify-between pt-2">
+                <button
+                  onClick={() => setStep(1)}
+                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Edit selected proposal */}
+          {step === 3 && editedProposal && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                  <Edit3 className="h-4 w-4 text-indigo-500" />
+                  Edita tu campaña
+                </h3>
+                <p className="text-sm text-gray-500">Ajusta cualquier campo antes de crear la campaña.</p>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Nombre de la campaña</label>
+                  <input
+                    type="text"
+                    value={editedProposal.name}
+                    onChange={(e) => setEditedProposal({ ...editedProposal, name: e.target.value })}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Mensaje</label>
+                  <textarea
+                    value={editedProposal.message}
+                    onChange={(e) => setEditedProposal({ ...editedProposal, message: e.target.value })}
+                    rows={4}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none"
+                  />
+                  <p className="mt-1 text-xs text-gray-400">
+                    Variables: {'{{nombre}}'}, {'{{apellido}}'}, {'{{plan}}'}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Tipo</label>
+                    <select
+                      value={editedProposal.type}
+                      onChange={(e) => setEditedProposal({ ...editedProposal, type: e.target.value })}
+                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                    >
+                      <option value="WELCOME">Bienvenida</option>
+                      <option value="RENEWAL">Renovación</option>
+                      <option value="REACTIVATION">Reactivación</option>
+                      <option value="PROMOTION">Promoción</option>
+                      <option value="BIRTHDAY">Cumpleaños</option>
+                      <option value="CUSTOM">Personalizada</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">Canal</label>
+                    <select
+                      value={editedProposal.channel}
+                      onChange={(e) => setEditedProposal({ ...editedProposal, channel: e.target.value })}
+                      className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                    >
+                      <option value="WHATSAPP">WhatsApp</option>
+                      <option value="EMAIL">Email</option>
+                      <option value="SMS">SMS</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Programar envío (opcional)
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={scheduledAt}
+                    onChange={(e) => setScheduledAt(e.target.value)}
+                    className="w-full rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+                  />
+                </div>
+
+                <div className="bg-indigo-50 rounded-xl p-4">
+                  <p className="text-xs text-indigo-600 font-medium mb-1">💡 Sugerencia IA</p>
+                  <p className="text-sm text-indigo-800">
+                    Segmento: {editedProposal.segment} • Mejor horario: {editedProposal.timing}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex justify-between pt-2">
+                <button
+                  onClick={() => setStep(2)}
+                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver a propuestas
+                </button>
+                <button
+                  onClick={() => setStep(4)}
+                  className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 transition-all shadow-sm"
+                >
+                  Revisar y Crear
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Confirm and create */}
+          {step === 4 && editedProposal && (
+            <div className="space-y-5">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900 mb-1 flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                  Confirmar campaña
+                </h3>
+                <p className="text-sm text-gray-500">Revisa los detalles y crea tu campaña.</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+                <div className="flex justify-between items-start">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Nombre</p>
+                    <p className="font-semibold text-gray-900 mt-0.5">{editedProposal.name}</p>
+                  </div>
+                  <span className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full font-medium">
+                    {typeLabels[editedProposal.type] || editedProposal.type}
+                  </span>
+                </div>
+
+                <div>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider">Mensaje</p>
+                  <p className="text-sm text-gray-800 mt-1 bg-white rounded-lg p-3 border border-gray-200 italic">
+                    "{editedProposal.message}"
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Canal</p>
+                    <p className="text-sm font-medium text-gray-900 mt-0.5">
+                      {editedProposal.channel === 'WHATSAPP' ? '📱 WhatsApp' : editedProposal.channel === 'EMAIL' ? '📧 Email' : '💬 SMS'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Programación</p>
+                    <p className="text-sm font-medium text-gray-900 mt-0.5">
+                      {scheduledAt ? new Date(scheduledAt).toLocaleString('es-MX') : 'Envío inmediato'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {createMutation.error && (
+                <div className="rounded-xl bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                  {(createMutation.error as any)?.response?.data?.error || 'Error al crear la campaña'}
+                </div>
+              )}
+
+              <div className="flex justify-between pt-2">
+                <button
+                  onClick={() => setStep(3)}
+                  className="flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Editar
+                </button>
+                <button
+                  onClick={handleCreateCampaign}
+                  disabled={createMutation.isPending}
+                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 px-6 py-3 text-sm font-bold text-white hover:from-emerald-700 hover:to-emerald-800 disabled:opacity-50 transition-all shadow-md hover:shadow-lg"
+                >
+                  {createMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Megaphone className="h-4 w-4" />
+                  )}
+                  Crear Campaña
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
 }
+
 
 function CampaignStatsModal({ campaign, onClose }: { campaign: Campaign; onClose: () => void }) {
   const { data: stats, isLoading } = useQuery({
@@ -559,48 +770,52 @@ function CampaignStatsModal({ campaign, onClose }: { campaign: Campaign; onClose
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-6 mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl p-7 mx-4 animate-in fade-in zoom-in-95">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Estadísticas</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Estadísticas</h2>
+            <p className="text-sm text-gray-500 mt-0.5">{campaign.name}</p>
+          </div>
+          <button onClick={onClose} className="rounded-lg p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <p className="text-sm text-gray-600 mb-4">{campaign.name}</p>
-
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex items-center justify-center py-10">
             <Loader2 className="h-6 w-6 animate-spin text-indigo-600" />
           </div>
         ) : stats ? (
           <div className="grid grid-cols-2 gap-4">
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-xl p-4 text-center border border-blue-100">
               <p className="text-2xl font-bold text-gray-900">{stats.sent || 0}</p>
-              <p className="text-xs text-gray-500">Enviados</p>
+              <p className="text-xs text-gray-500 mt-1">Enviados</p>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gradient-to-br from-emerald-50 to-green-50 rounded-xl p-4 text-center border border-emerald-100">
               <p className="text-2xl font-bold text-gray-900">{stats.delivered || 0}</p>
-              <p className="text-xs text-gray-500">Entregados</p>
+              <p className="text-xs text-gray-500 mt-1">Entregados</p>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gradient-to-br from-purple-50 to-pink-50 rounded-xl p-4 text-center border border-purple-100">
               <p className="text-2xl font-bold text-gray-900">{stats.opened || 0}</p>
-              <p className="text-xs text-gray-500">Abiertos</p>
+              <p className="text-xs text-gray-500 mt-1">Abiertos</p>
             </div>
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
+            <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl p-4 text-center border border-amber-100">
               <p className="text-2xl font-bold text-gray-900">{stats.clicked || 0}</p>
-              <p className="text-xs text-gray-500">Clicks</p>
+              <p className="text-xs text-gray-500 mt-1">Clicks</p>
             </div>
           </div>
         ) : (
-          <p className="text-center text-gray-500 py-4">Sin estadísticas disponibles</p>
+          <div className="text-center py-8 text-gray-400">
+            <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-50" />
+            <p className="font-medium">Sin estadísticas disponibles</p>
+          </div>
         )}
 
         <div className="mt-6 flex justify-end">
           <button
             onClick={onClose}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all"
           >
             Cerrar
           </button>
