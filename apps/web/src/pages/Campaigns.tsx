@@ -9,6 +9,10 @@ import {
   Loader2,
   X,
   Megaphone,
+  Bot,
+  Sparkles,
+  CheckCircle2,
+  Lightbulb,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -30,6 +34,13 @@ interface Campaign {
     clicked: number;
   };
   createdAt: string;
+}
+
+interface AISuggestion {
+  messageVariants: string[];
+  bestTime: string;
+  tips: string[];
+  subject?: string;
 }
 
 const statusLabels: Record<string, string> = {
@@ -62,6 +73,7 @@ const typeLabels: Record<string, string> = {
 export default function Campaigns() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [selectedStats, setSelectedStats] = useState<Campaign | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
   const queryClient = useQueryClient();
 
   const { data: campaigns, isLoading, error } = useQuery<Campaign[]>({
@@ -110,6 +122,14 @@ export default function Campaigns() {
           Nueva Campaña
         </button>
       </div>
+
+      {/* Success Toast */}
+      {successMessage && (
+        <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 p-4">
+          <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+          <p className="text-sm font-medium text-green-700">{successMessage}</p>
+        </div>
+      )}
 
       {campaigns && campaigns.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 text-gray-500">
@@ -209,7 +229,13 @@ export default function Campaigns() {
 
       {/* Create Campaign Modal */}
       {showCreateForm && (
-        <CreateCampaignModal onClose={() => setShowCreateForm(false)} />
+        <CreateCampaignModal
+          onClose={() => setShowCreateForm(false)}
+          onSuccess={() => {
+            setSuccessMessage('Campaña creada exitosamente');
+            setTimeout(() => setSuccessMessage(''), 3000);
+          }}
+        />
       )}
 
       {/* Stats Modal */}
@@ -220,17 +246,38 @@ export default function Campaigns() {
   );
 }
 
-function CreateCampaignModal({ onClose }: { onClose: () => void }) {
+function CreateCampaignModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     name: '',
+    objective: '',
     type: 'PROMOTION',
     channel: 'WHATSAPP',
     message: '',
+    frequency: 'ONE_TIME',
     scheduledAt: '',
   });
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiSuggestions, setAiSuggestions] = useState<AISuggestion | null>(null);
+  const [showAiPanel, setShowAiPanel] = useState(false);
 
-  const mutation = useMutation({
+  // AI assistant mutation
+  const aiMutation = useMutation({
+    mutationFn: async (description: string) => {
+      const response = await api.post('/ai/campaign-assistant', {
+        description,
+        type: form.type,
+        channel: form.channel,
+      });
+      return response.data;
+    },
+    onSuccess: (data) => {
+      setAiSuggestions(data.suggestions || data);
+    },
+  });
+
+  // Create campaign mutation
+  const createMutation = useMutation({
     mutationFn: async (data: Record<string, string | null>) => {
       const response = await api.post('/campaigns', data);
       return response.data;
@@ -238,12 +285,13 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] });
       onClose();
+      onSuccess();
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutation.mutate({
+    createMutation.mutate({
       name: form.name,
       type: form.type,
       channel: form.channel,
@@ -252,9 +300,20 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
     });
   };
 
+  const handleAiGenerate = () => {
+    if (aiDescription.trim()) {
+      aiMutation.mutate(aiDescription.trim());
+    }
+  };
+
+  const handleAcceptSuggestion = (message: string) => {
+    setForm({ ...form, message });
+    setShowAiPanel(false);
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 mx-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 overflow-y-auto py-4">
+      <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl p-6 mx-4 my-auto">
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-lg font-semibold text-gray-900">Nueva Campaña</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
@@ -262,9 +321,9 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {mutation.error && (
+        {createMutation.error && (
           <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-            {(mutation.error as any)?.response?.data?.error || 'Error al crear la campaña'}
+            {(createMutation.error as any)?.response?.data?.error || 'Error al crear la campaña'}
           </div>
         )}
 
@@ -281,7 +340,18 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Objetivo</label>
+            <input
+              type="text"
+              value={form.objective}
+              onChange={(e) => setForm({ ...form, objective: e.target.value })}
+              placeholder="Ej: Recuperar socios inactivos del último mes"
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+            />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Tipo</label>
               <select
@@ -309,23 +379,144 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
                 <option value="SMS">SMS</option>
               </select>
             </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Frecuencia</label>
+              <select
+                value={form.frequency}
+                onChange={(e) => setForm({ ...form, frequency: e.target.value })}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+              >
+                <option value="ONE_TIME">Una vez</option>
+                <option value="DAILY">Diaria</option>
+                <option value="WEEKLY">Semanal</option>
+                <option value="MONTHLY">Mensual</option>
+              </select>
+            </div>
+          </div>
+
+          {/* AI Assistant Section */}
+          <div className="border border-indigo-200 rounded-lg bg-indigo-50/50 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Bot className="h-4 w-4 text-indigo-600" />
+                <span className="text-sm font-medium text-indigo-900">Asistente IA</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAiPanel(!showAiPanel)}
+                className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+              >
+                {showAiPanel ? 'Ocultar' : 'Mostrar'}
+              </button>
+            </div>
+
+            {showAiPanel && (
+              <div className="space-y-3">
+                <div>
+                  <textarea
+                    value={aiDescription}
+                    onChange={(e) => setAiDescription(e.target.value)}
+                    placeholder="Describa su campaña: ej. 'Quiero recuperar socios que no vienen hace 2 semanas con un mensaje motivacional y un descuento del 20%'"
+                    rows={3}
+                    className="w-full rounded-lg border border-indigo-200 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none bg-white"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAiGenerate}
+                  disabled={!aiDescription.trim() || aiMutation.isPending}
+                  className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {aiMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  🤖 Generar ideas con IA
+                </button>
+
+                {aiMutation.error && (
+                  <div className="rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
+                    Error al generar sugerencias. Intente nuevamente.
+                  </div>
+                )}
+
+                {/* AI Suggestions */}
+                {aiSuggestions && (
+                  <div className="space-y-3 pt-3 border-t border-indigo-200">
+                    <p className="text-xs font-medium text-indigo-700 flex items-center gap-1">
+                      <Lightbulb className="h-3 w-3" />
+                      Sugerencias generadas:
+                    </p>
+
+                    {/* Best time */}
+                    {aiSuggestions.bestTime && (
+                      <div className="bg-white rounded-lg p-3 border border-indigo-100">
+                        <p className="text-xs text-gray-500 mb-1">⏰ Mejor horario sugerido</p>
+                        <p className="text-sm text-gray-900">{aiSuggestions.bestTime}</p>
+                      </div>
+                    )}
+
+                    {/* Message variants */}
+                    {aiSuggestions.messageVariants && aiSuggestions.messageVariants.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-xs text-gray-500">💬 Variantes de mensaje:</p>
+                        {aiSuggestions.messageVariants.map((variant, idx) => (
+                          <div
+                            key={idx}
+                            className="bg-white rounded-lg p-3 border border-indigo-100 flex items-start justify-between gap-3"
+                          >
+                            <p className="text-sm text-gray-800 flex-1">{variant}</p>
+                            <button
+                              type="button"
+                              onClick={() => handleAcceptSuggestion(variant)}
+                              className="flex-shrink-0 text-xs bg-indigo-100 text-indigo-700 px-2 py-1 rounded hover:bg-indigo-200 font-medium"
+                            >
+                              Usar
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Tips */}
+                    {aiSuggestions.tips && aiSuggestions.tips.length > 0 && (
+                      <div className="bg-white rounded-lg p-3 border border-indigo-100">
+                        <p className="text-xs text-gray-500 mb-2">💡 Consejos:</p>
+                        <ul className="space-y-1">
+                          {aiSuggestions.tips.map((tip, idx) => (
+                            <li key={idx} className="text-sm text-gray-700 flex items-start gap-2">
+                              <span className="text-indigo-400 mt-0.5">•</span>
+                              {tip}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mensaje *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Plantilla WhatsApp / Mensaje *</label>
             <textarea
               value={form.message}
               onChange={(e) => setForm({ ...form, message: e.target.value })}
               required
               rows={4}
-              placeholder="Escriba el mensaje de la campaña..."
+              placeholder="Escriba el mensaje de la campaña o use el asistente IA para generar uno..."
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none resize-none"
             />
+            <p className="mt-1 text-xs text-gray-400">
+              Variables disponibles: {'{{nombre}}'}, {'{{apellido}}'}, {'{{plan}}'}
+            </p>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Fecha programada (opcional)
+              Fecha de inicio (opcional)
             </label>
             <input
               type="datetime-local"
@@ -345,10 +536,10 @@ function CreateCampaignModal({ onClose }: { onClose: () => void }) {
             </button>
             <button
               type="submit"
-              disabled={mutation.isPending}
+              disabled={createMutation.isPending}
               className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
-              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
+              {createMutation.isPending && <Loader2 className="h-4 w-4 animate-spin" />}
               Crear Campaña
             </button>
           </div>

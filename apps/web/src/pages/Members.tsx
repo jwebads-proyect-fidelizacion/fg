@@ -9,6 +9,7 @@ import {
   Loader2,
   X,
   Users,
+  CheckCircle2,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -40,6 +41,7 @@ export default function Members() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -63,6 +65,8 @@ export default function Members() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['members'] });
       setShowCreateModal(false);
+      setSuccessMessage('Socio creado exitosamente');
+      setTimeout(() => setSuccessMessage(''), 3000);
     },
   });
 
@@ -83,6 +87,14 @@ export default function Members() {
           Nuevo Socio
         </button>
       </div>
+
+      {/* Success Toast */}
+      {successMessage && (
+        <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 p-4 animate-in fade-in">
+          <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+          <p className="text-sm font-medium text-green-700">{successMessage}</p>
+        </div>
+      )}
 
       {/* Search */}
       <div className="relative">
@@ -222,19 +234,32 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
     lastName: '',
     phone: '',
     email: '',
-    documentId: '',
-    marketingConsent: false,
+    birthDate: '',
   });
+  const [phoneError, setPhoneError] = useState('');
+
+  const validatePhone = (phone: string): boolean => {
+    // E.164 format: + followed by 1-15 digits
+    const e164Regex = /^\+[1-9]\d{1,14}$/;
+    return e164Regex.test(phone);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setPhoneError('');
+
+    if (!validatePhone(form.phone)) {
+      setPhoneError('El teléfono debe estar en formato E.164 (ej: +5491123456789)');
+      return;
+    }
+
     onSubmit({
-      firstName: form.firstName,
-      lastName: form.lastName,
-      phone: form.phone,
-      email: form.email || null,
-      documentId: form.documentId || null,
-      marketingConsent: form.marketingConsent,
+      firstName: form.firstName.trim(),
+      lastName: form.lastName.trim(),
+      phone: form.phone.trim(),
+      email: form.email.trim() || null,
+      birthDate: form.birthDate || null,
+      marketingConsent: true,
     });
   };
 
@@ -242,7 +267,7 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
       <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 mx-4">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Nuevo Socio</h2>
+          <h2 className="text-lg font-semibold text-gray-900">Agregar Socio</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
             <X className="h-5 w-5" />
           </button>
@@ -250,7 +275,7 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
 
         {error && (
           <div className="mb-4 rounded-lg bg-red-50 border border-red-200 p-3 text-sm text-red-700">
-            {(error as any)?.response?.data?.error || 'Error al crear el socio'}
+            {(error as any)?.response?.data?.error || 'Error al crear el socio. Verifique los datos e intente nuevamente.'}
           </div>
         )}
 
@@ -263,6 +288,7 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
                 value={form.firstName}
                 onChange={(e) => setForm({ ...form, firstName: e.target.value })}
                 required
+                placeholder="Juan"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
               />
             </div>
@@ -273,25 +299,37 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
                 value={form.lastName}
                 onChange={(e) => setForm({ ...form, lastName: e.target.value })}
                 required
+                placeholder="Pérez"
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
               />
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono *</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Teléfono (E.164) *</label>
             <input
               type="tel"
               value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              onChange={(e) => {
+                setForm({ ...form, phone: e.target.value });
+                if (phoneError) setPhoneError('');
+              }}
               required
-              placeholder="+521234567890"
-              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+              placeholder="+5491123456789"
+              className={`w-full rounded-lg border px-3 py-2 text-sm focus:ring-2 outline-none ${
+                phoneError
+                  ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+                  : 'border-gray-300 focus:border-indigo-500 focus:ring-indigo-500/20'
+              }`}
             />
+            {phoneError && (
+              <p className="mt-1 text-xs text-red-600">{phoneError}</p>
+            )}
+            <p className="mt-1 text-xs text-gray-400">Formato: +[código país][número] sin espacios</p>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Email (opcional)</label>
             <input
               type="email"
               value={form.email}
@@ -302,26 +340,13 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Documento ID</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Fecha de nacimiento (opcional)</label>
             <input
-              type="text"
-              value={form.documentId}
-              onChange={(e) => setForm({ ...form, documentId: e.target.value })}
+              type="date"
+              value={form.birthDate}
+              onChange={(e) => setForm({ ...form, birthDate: e.target.value })}
               className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
             />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="marketingConsent"
-              checked={form.marketingConsent}
-              onChange={(e) => setForm({ ...form, marketingConsent: e.target.checked })}
-              className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-            />
-            <label htmlFor="marketingConsent" className="text-sm text-gray-700">
-              Acepta recibir comunicaciones de marketing
-            </label>
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t">
@@ -338,7 +363,7 @@ function CreateMemberModal({ onClose, onSubmit, isLoading, error }: CreateMember
               className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
             >
               {isLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Crear Socio
+              Agregar Socio
             </button>
           </div>
         </form>

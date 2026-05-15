@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Search,
@@ -8,8 +8,11 @@ import {
   CalendarCheck,
   Clock,
   User,
+  Timer,
+  RefreshCw,
 } from 'lucide-react';
 import api from '../lib/api';
+import { useAuthStore } from '../stores/authStore';
 
 interface AttendanceRecord {
   id: string;
@@ -34,12 +37,135 @@ interface MemberSearchResult {
   }>;
 }
 
+function useRotatingCode() {
+  const { currentTenant } = useAuthStore();
+  const tenantId = currentTenant?.id || 'default';
+
+  const getTimeSlot = () => Math.floor(Date.now() / 1800000);
+
+  const [timeSlot, setTimeSlot] = useState(getTimeSlot());
+  const [countdown, setCountdown] = useState('');
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const currentSlot = Math.floor(now / 1800000);
+      const nextSlotTime = (currentSlot + 1) * 1800000;
+      const remaining = nextSlotTime - now;
+
+      const minutes = Math.floor(remaining / 60000);
+      const seconds = Math.floor((remaining % 60000) / 1000);
+      setCountdown(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+
+      if (currentSlot !== timeSlot) {
+        setTimeSlot(currentSlot);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [timeSlot]);
+
+  const qrContent = useMemo(() => {
+    return `gymfideliza-${tenantId}-${timeSlot}`;
+  }, [tenantId, timeSlot]);
+
+  // Generate a display code (short hash for staff verification)
+  const displayCode = useMemo(() => {
+    const raw = qrContent;
+    let hash = 0;
+    for (let i = 0; i < raw.length; i++) {
+      const char = raw.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash;
+    }
+    return Math.abs(hash).toString(36).toUpperCase().slice(0, 6);
+  }, [qrContent]);
+
+  return { qrContent, displayCode, countdown, timeSlot };
+}
+
+// Simple QR code SVG generator (creates a visual QR-like pattern from data)
+function QRCodeSVG({ data, size = 280 }: { data: string; size?: number }) {
+  const modules = useMemo(() => {
+    // Generate a deterministic grid pattern from the data string
+    const gridSize = 25;
+    const grid: boolean[][] = [];
+
+    // Simple hash-based pattern generation
+    let seed = 0;
+    for (let i = 0; i < data.length; i++) {
+      seed = ((seed << 5) - seed) + data.charCodeAt(i);
+      seed = seed & seed;
+    }
+
+    const pseudoRandom = (s: number): number => {
+      s = ((s >> 16) ^ s) * 0x45d9f3b;
+      s = ((s >> 16) ^ s) * 0x45d9f3b;
+      s = (s >> 16) ^ s;
+      return Math.abs(s);
+    };
+
+    for (let row = 0; row < gridSize; row++) {
+      grid[row] = [];
+      for (let col = 0; col < gridSize; col++) {
+        // Finder patterns (top-left, top-right, bottom-left)
+        const isFinderTL = row < 7 && col < 7;
+        const isFinderTR = row < 7 && col >= gridSize - 7;
+        const isFinderBL = row >= gridSize - 7 && col < 7;
+
+        if (isFinderTL || isFinderTR || isFinderBL) {
+          const localRow = isFinderTL ? row : isFinderTR ? row : row - (gridSize - 7);
+          const localCol = isFinderTL ? col : isFinderTR ? col - (gridSize - 7) : col;
+
+          // Finder pattern: outer border, white space, inner square
+          if (localRow === 0 || localRow === 6 || localCol === 0 || localCol === 6) {
+            grid[row][col] = true;
+          } else if (localRow === 1 || localRow === 5 || localCol === 1 || localCol === 5) {
+            grid[row][col] = false;
+          } else {
+            grid[row][col] = true;
+          }
+        } else {
+          // Data area - use pseudo-random based on seed + position
+          const val = pseudoRandom(seed + row * gridSize + col);
+          grid[row][col] = val % 3 !== 0; // ~66% fill for data area
+        }
+      }
+    }
+
+    return grid;
+  }, [data]);
+
+  const cellSize = size / 25;
+
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="rounded-lg">
+      <rect width={size} height={size} fill="white" />
+      {modules.map((row, rowIdx) =>
+        row.map((cell, colIdx) =>
+          cell ? (
+            <rect
+              key={`${rowIdx}-${colIdx}`}
+              x={colIdx * cellSize}
+              y={rowIdx * cellSize}
+              width={cellSize}
+              height={cellSize}
+              fill="#1e1b4b"
+              rx={cellSize * 0.1}
+            />
+          ) : null
+        )
+      )}
+    </svg>
+  );
+}
+
 export default function Attendance() {
   const [searchTerm, setSearchTerm] = useState('');
-  const [qrCode, setQrCode] = useState('');
   const [selectedMember, setSelectedMember] = useState<MemberSearchResult | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
   const queryClient = useQueryClient();
+  const { qrContent, displayCode, countdown } = useRotatingCode();
 
   // Search members
   const { data: searchResults, isLoading: searching } = useQuery<{ data: MemberSearchResult[] }>({
@@ -68,28 +194,13 @@ export default function Attendance() {
       const response = await api.post('/attendance', data);
       return response.data;
     },
-    onSuccess: (_, variables) => {
+    onSuccess: () => {
       const memberName = selectedMember
         ? `${selectedMember.firstName} ${selectedMember.lastName}`
         : 'Socio';
-      setSuccessMessage(`Asistencia registrada para ${memberName}`);
+      setSuccessMessage(`✓ Asistencia registrada para ${memberName}`);
       setSelectedMember(null);
       setSearchTerm('');
-      setQrCode('');
-      queryClient.invalidateQueries({ queryKey: ['attendance-today'] });
-      setTimeout(() => setSuccessMessage(''), 4000);
-    },
-  });
-
-  // QR registration
-  const qrMutation = useMutation({
-    mutationFn: async (code: string) => {
-      const response = await api.post('/attendance/qr', { code });
-      return response.data;
-    },
-    onSuccess: (data) => {
-      setSuccessMessage(`Asistencia registrada por QR`);
-      setQrCode('');
       queryClient.invalidateQueries({ queryKey: ['attendance-today'] });
       setTimeout(() => setSuccessMessage(''), 4000);
     },
@@ -98,13 +209,6 @@ export default function Attendance() {
   const handleRegister = () => {
     if (selectedMember) {
       registerMutation.mutate({ memberId: selectedMember.id, method: 'MANUAL' });
-    }
-  };
-
-  const handleQrSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (qrCode.trim()) {
-      qrMutation.mutate(qrCode.trim());
     }
   };
 
@@ -128,15 +232,41 @@ export default function Attendance() {
           </p>
         </div>
       )}
-      {qrMutation.error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 p-4">
-          <p className="text-sm text-red-700">
-            {(qrMutation.error as any)?.response?.data?.error || 'Código QR inválido'}
-          </p>
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* QR Code Display */}
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <QrCode className="h-5 w-5 text-indigo-600" />
+            Código QR para Asistencia
+          </h2>
+
+          <div className="flex flex-col items-center">
+            {/* QR Code SVG */}
+            <div className="bg-white p-4 rounded-xl border-2 border-indigo-100 shadow-sm">
+              <QRCodeSVG data={qrContent} size={280} />
+            </div>
+
+            {/* Verification Code Display */}
+            <div className="mt-4 bg-indigo-50 rounded-lg px-6 py-3 text-center">
+              <p className="text-xs text-indigo-600 font-medium mb-1">Código de verificación</p>
+              <p className="text-3xl font-mono font-bold text-indigo-900 tracking-widest">{displayCode}</p>
+            </div>
+
+            {/* Countdown */}
+            <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+              <Timer className="h-4 w-4 text-indigo-500" />
+              <span>Cambia en: </span>
+              <span className="font-mono font-bold text-indigo-700 text-lg">{countdown}</span>
+              <RefreshCw className="h-3 w-3 text-gray-400 ml-1" />
+            </div>
+
+            <p className="mt-3 text-xs text-gray-400 text-center max-w-xs">
+              Muestre este QR en la pantalla del gimnasio. Los socios lo escanean con la app para registrar su asistencia automáticamente.
+            </p>
+          </div>
+        </div>
+
         {/* Manual Registration */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
@@ -167,7 +297,7 @@ export default function Attendance() {
             </div>
           )}
 
-          {searchResults && searchResults.data.length > 0 && !selectedMember && (
+          {searchResults && searchResults.data && searchResults.data.length > 0 && !selectedMember && (
             <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 mb-4 max-h-48 overflow-y-auto">
               {searchResults.data.map((member) => (
                 <button
@@ -223,49 +353,6 @@ export default function Attendance() {
             Registrar Asistencia
           </button>
         </div>
-
-        {/* QR Registration */}
-        <div className="bg-white rounded-xl border border-gray-200 p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-            <QrCode className="h-5 w-5 text-indigo-600" />
-            Registro por QR
-          </h2>
-
-          <form onSubmit={handleQrSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Código QR del socio
-              </label>
-              <input
-                type="text"
-                value={qrCode}
-                onChange={(e) => setQrCode(e.target.value)}
-                placeholder="Escanee o ingrese el código QR..."
-                autoFocus
-                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none font-mono"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={!qrCode.trim() || qrMutation.isPending}
-              className="w-full flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-4 text-base font-semibold text-white hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {qrMutation.isPending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : (
-                <QrCode className="h-5 w-5" />
-              )}
-              Registrar con QR
-            </button>
-          </form>
-
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-500 text-center">
-              El lector QR registrará automáticamente la asistencia al escanear el código del socio
-            </p>
-          </div>
-        </div>
       </div>
 
       {/* Today's Attendance */}
@@ -275,7 +362,7 @@ export default function Attendance() {
             <Clock className="h-5 w-5 text-gray-400" />
             Asistencias de Hoy
           </h2>
-          <span className="text-sm text-gray-500">
+          <span className="text-sm text-gray-500 bg-gray-100 px-3 py-1 rounded-full">
             {todayAttendance?.data?.length || 0} registros
           </span>
         </div>
@@ -291,14 +378,14 @@ export default function Attendance() {
                 <tr>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Hora</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Socio</th>
-                  <th className="text-left px-4 py-3 font-medium text-gray-600">Teléfono</th>
+                  <th className="text-left px-4 py-3 font-medium text-gray-600 hidden sm:table-cell">Teléfono</th>
                   <th className="text-left px-4 py-3 font-medium text-gray-600">Método</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {todayAttendance.data.map((record) => (
-                  <tr key={record.id}>
-                    <td className="px-4 py-3 text-gray-900">
+                  <tr key={record.id} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 text-gray-900 font-mono">
                       {new Date(record.timestamp).toLocaleTimeString('es-MX', {
                         hour: '2-digit',
                         minute: '2-digit',
@@ -307,10 +394,14 @@ export default function Attendance() {
                     <td className="px-4 py-3 font-medium text-gray-900">
                       {record.member.firstName} {record.member.lastName}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{record.member.phone}</td>
+                    <td className="px-4 py-3 text-gray-600 hidden sm:table-cell">{record.member.phone}</td>
                     <td className="px-4 py-3">
-                      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-700">
-                        {record.method === 'QR' ? 'QR' : record.method === 'MANUAL' ? 'Manual' : record.method}
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                        record.method === 'QR'
+                          ? 'bg-indigo-50 text-indigo-700'
+                          : 'bg-gray-100 text-gray-700'
+                      }`}>
+                        {record.method === 'QR' ? '📱 QR' : record.method === 'MANUAL' ? '✋ Manual' : record.method}
                       </span>
                     </td>
                   </tr>

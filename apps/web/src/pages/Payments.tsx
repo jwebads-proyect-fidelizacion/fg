@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   Search,
@@ -7,6 +7,12 @@ import {
   Loader2,
   Wallet,
   Download,
+  Link2,
+  Copy,
+  CheckCircle2,
+  MessageCircle,
+  Save,
+  ExternalLink,
 } from 'lucide-react';
 import api from '../lib/api';
 
@@ -60,9 +66,25 @@ const statusColors: Record<string, string> = {
   VOIDED: 'bg-gray-100 text-gray-600',
 };
 
+const PAYMENT_LINK_KEY = 'gym-payment-link';
+
 export default function Payments() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [paymentLink, setPaymentLink] = useState('');
+  const [paymentLinkInput, setPaymentLinkInput] = useState('');
+  const [linkSaved, setLinkSaved] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Load payment link from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(PAYMENT_LINK_KEY);
+    if (saved) {
+      setPaymentLink(saved);
+      setPaymentLinkInput(saved);
+    }
+  }, []);
 
   const { data, isLoading, error } = useQuery<PaymentsResponse>({
     queryKey: ['payments', search, page],
@@ -75,6 +97,47 @@ export default function Payments() {
       return response.data;
     },
   });
+
+  const handleSaveLink = () => {
+    const trimmed = paymentLinkInput.trim();
+    if (trimmed) {
+      localStorage.setItem(PAYMENT_LINK_KEY, trimmed);
+      setPaymentLink(trimmed);
+      setLinkSaved(true);
+      setSuccessMessage('Link de pago guardado exitosamente');
+      setTimeout(() => {
+        setLinkSaved(false);
+        setSuccessMessage('');
+      }, 3000);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    if (paymentLink) {
+      try {
+        await navigator.clipboard.writeText(paymentLink);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+      } catch {
+        // Fallback for older browsers
+        const textArea = document.createElement('textarea');
+        textArea.value = paymentLink;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+        setLinkCopied(true);
+        setTimeout(() => setLinkCopied(false), 2000);
+      }
+    }
+  };
+
+  const handleSendWhatsApp = () => {
+    if (paymentLink) {
+      const message = encodeURIComponent(`¡Hola! Aquí está el link para realizar tu pago: ${paymentLink}`);
+      window.open(`https://wa.me/?text=${message}`, '_blank');
+    }
+  };
 
   const handleExport = async () => {
     try {
@@ -104,6 +167,72 @@ export default function Payments() {
           <Download className="h-4 w-4" />
           Exportar CSV
         </button>
+      </div>
+
+      {/* Success Toast */}
+      {successMessage && (
+        <div className="flex items-center gap-3 rounded-lg bg-green-50 border border-green-200 p-4">
+          <CheckCircle2 className="h-5 w-5 text-green-600 flex-shrink-0" />
+          <p className="text-sm font-medium text-green-700">{successMessage}</p>
+        </div>
+      )}
+
+      {/* Payment Link Section */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <Link2 className="h-5 w-5 text-indigo-600" />
+          <h2 className="text-lg font-semibold text-gray-900">Link de Pago del Gimnasio</h2>
+        </div>
+        <p className="text-sm text-gray-500 mb-4">
+          Pegue aquí su link de pago (MercadoPago, Stripe, etc.) para compartirlo fácilmente con los socios.
+        </p>
+
+        <div className="flex gap-3">
+          <input
+            type="url"
+            value={paymentLinkInput}
+            onChange={(e) => setPaymentLinkInput(e.target.value)}
+            placeholder="https://mpago.la/tu-link o https://buy.stripe.com/..."
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2.5 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 outline-none"
+          />
+          <button
+            onClick={handleSaveLink}
+            disabled={!paymentLinkInput.trim()}
+            className="flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+          >
+            {linkSaved ? <CheckCircle2 className="h-4 w-4" /> : <Save className="h-4 w-4" />}
+            {linkSaved ? 'Guardado' : 'Guardar'}
+          </button>
+        </div>
+
+        {/* Action buttons when link is saved */}
+        {paymentLink && (
+          <div className="mt-4 flex flex-wrap items-center gap-3 pt-4 border-t border-gray-100">
+            <a
+              href={paymentLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Abrir link
+            </a>
+            <button
+              onClick={handleCopyLink}
+              className="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              {linkCopied ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : <Copy className="h-4 w-4" />}
+              {linkCopied ? 'Copiado' : 'Copiar link'}
+            </button>
+            <button
+              onClick={handleSendWhatsApp}
+              className="flex items-center gap-2 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700"
+            >
+              <MessageCircle className="h-4 w-4" />
+              Enviar por WhatsApp
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Search */}
